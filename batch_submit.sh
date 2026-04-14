@@ -19,10 +19,13 @@ NGPUS=1
 label_cls_nodes="['label_Upsilon3g','label_QCD']"
 load_model="weaver/model/save/2024.pt"
 
+# Change to your conda environment
 source /users/sgottli4/miniconda3/etc/profile.d/conda.sh
 conda activate weaver
 
-
+# Datasets are sitting on BRUX at /HEP/export/home/sgottli4/CMSSW_15_0_4/src/UpsilonTo3Gluons/mc/Upsilon_modified_mass/run1/deepntuples/job*/*.root, /HEP/export/home/sgottli4/CMSSW_15_0_4/src/UpsilonTo3Gluons/mc/QCD/QCD*/run1/deepntuples/job*/*.root, /HEP/export/home/sgottli4/CMSSW_15_0_4/src/UpsilonTo3Gluons/mc/SingleUpsilon/run1/deepntuples/job*/*.root
+# Change model prefix to "--model-prefix weaver/model/${PREFIX}/_best_epoch_state.pt" to train starting from previous best epoch
+# --freeze-model-weights "(.*embed.*|.*blocks.*)" freezes transformer model weights; can be removed for full training
 torchrun --standalone --nnodes=1 --nproc_per_node=$NGPUS weaver/train.py \
 --run-mode "train,val,test" --train-mode hybrid --in-memory \
 -o use_swiglu_config True -o use_pair_norm_config True \
