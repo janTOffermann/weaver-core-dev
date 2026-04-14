@@ -273,12 +273,13 @@ def train_load(args):
                                  infinity_mode=args.steps_per_epoch_val is not None,
                                  in_memory=args.in_memory,
                                  name='val' + ('' if args.local_rank is None else '_rank%d' % args.local_rank))
+    actual_workers = min(args.num_workers, int(len(train_files) * args.file_fraction))
     train_loader = DataLoader(train_data, batch_size=args.batch_size, drop_last=True, pin_memory=True,
-                              num_workers=min(args.num_workers, int(len(train_files) * args.file_fraction)),
-                              persistent_workers=args.num_workers > 0 and args.steps_per_epoch is not None)
+                              num_workers=actual_workers,
+                              persistent_workers=actual_workers > 0 and args.steps_per_epoch is not None)
     val_loader = DataLoader(val_data, batch_size=args.batch_size, drop_last=True, pin_memory=True,
-                            num_workers=min(args.num_workers, int(len(val_files) * args.file_fraction)),
-                            persistent_workers=args.num_workers > 0 and args.steps_per_epoch_val is not None)
+                            num_workers=actual_workers,
+                            persistent_workers=actual_workers > 0 and args.steps_per_epoch_val is not None)
     data_config = train_data.config
     train_input_names = train_data.config.input_names
     train_label_names = train_data.config.label_names

@@ -21,7 +21,7 @@ from utils.nn.tools import (
 )
 from utils.import_tools import import_module
 
-ParticleTransformerTagger_ncoll = import_module(os.path.join(os.path.dirname(__file__), '../ParticleTransformer2024Plus.py'), 'ParT').ParticleTransformerTagger_ncoll  #_forScouting
+ParticleTransformerTagger_ncoll = import_module(os.path.join(os.path.dirname(__file__), 'ParticleTransformer2024Plus_forScouting.py'), 'ParT').ParticleTransformerTagger_ncoll  #_forScouting
 
 # Adapted from model in example_ParticleTransformer2024PlusTagger_unified2.py
 
@@ -173,6 +173,12 @@ class ComposedHybridLoss(torch.nn.Module):
         input_reg_unifd = input_reg[:, :self.num_unifd]
         input_reg_split = input_reg[:, self.num_unifd:]
 
+        # print("input_reg shape:", input_reg.shape)
+        # print("input_reg_unifd shape:", input_reg_unifd.shape)
+        # print("input_reg_split shape:", input_reg_split.shape)
+        # print("num_unifd:", self.num_unifd)
+        # print("split:", self.split)    
+    
         # compute unified regression loss
         n_target_reg = target_reg.shape[1]
         loss_reg_unifd = self.loss_reg_unifd_fn(input_reg_unifd, target_reg[:, self.unifd])

@@ -525,7 +525,7 @@ class Attention(torch.nn.Module):
         key_padding_mask = _canonical_mask(
             mask=key_padding_mask,
             mask_name="key_padding_mask",
-            other_type=F._none_or_dtype(attn_mask),
+            other_type=None if attn_mask is None else attn_mask.dtype,
             other_name="attn_mask",
             target_type=query.dtype
         )
