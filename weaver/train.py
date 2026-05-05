@@ -1068,7 +1068,7 @@ def _main(args):
                             (epoch, valid_metric, best_valid_metric), color='bold')
 
             if args.early_stop:
-                assert args.run_mode == 'default'
+                # assert args.run_mode == 'default'
                 # override the best_epoch behavier and break if the eval loss exceeds the training loss too much
                 if args.train_mode == 'cls':
                     assert args.train_mode_params == 'metric:loss'

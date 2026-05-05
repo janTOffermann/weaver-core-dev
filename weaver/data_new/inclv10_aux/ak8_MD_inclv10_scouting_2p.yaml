@@ -3,32 +3,32 @@
 
 # to select scouting jets, ensure that QCD scouting jets from the resonant (signal) samples are not included (they are not excluded in the samples; only reco QCD jets are excluded)
 selection: >-
-    (jet_tightId==1) & (jet_no<2) & (scoutfj_pt>200) & (scoutfj_pt<5000) & (scoutfj_sdmass>0) & (scoutfj_sdmass<650) & (ak.num(scoutpfcand_px) > 0) &
+    (scoutfj_pt>25) & (scoutfj_pt<300) & (scoutfj_sdmass>0) & (scoutfj_sdmass<50) & (ak.num(scoutpfcand_px) > 0) &
     (
-      ((sample_isQCD==1) & (scoutfj_label >= 309) & (scoutfj_label < 314) & (event_no%7!=0)) |
+      ((sample_isQCD==1) & (scoutfj_label >= 2) & (scoutfj_label <= 6) & (event_no%7!=0)) |
       ((sample_isQCD==0) & (scoutfj_isQCD==0))
     )
 ### selection to apply at test time (i.e., when running w/ --predict)
 test_time_selection: >-
-    (jet_tightId==1) & (jet_no<2)
+      (scoutfj_pt>25) & (scoutfj_pt<300) 
 
 new_variables:
     ### [format] name: formula
     ### can use functions from `math`, `np` (numpy), and `ak` in the expression
     # classes for reweighting
-    label_Top_bWQQ: ((scoutfj_label >= 0) & (scoutfj_label < 2))
-    label_Top_bWQ: ((scoutfj_label >= 2) & (scoutfj_label < 5))
-    label_Top_bWev: (scoutfj_label == 5)
-    label_Top_bWmv: (scoutfj_label == 6)
-    label_Top_bWtauev: (scoutfj_label == 7)
-    label_Top_bWtaumv: (scoutfj_label == 8)
-    label_Top_bWtauhv: (scoutfj_label == 9)
-    label_Top_WQQ: ((scoutfj_label >= 10) & (scoutfj_label < 12))
-    label_Top_Wev: (scoutfj_label == 12)
-    label_Top_Wmv: (scoutfj_label == 13)
-    label_Top_Wtauev: (scoutfj_label == 14)
-    label_Top_Wtaumv: (scoutfj_label == 15)
-    label_Top_Wtauhv: (scoutfj_label == 16)
+    # label_Top_bWQQ: ((scoutfj_label >= 0) & (scoutfj_label < 2))
+    # label_Top_bWQ: ((scoutfj_label >= 2) & (scoutfj_label < 5))
+    # label_Top_bWev: (scoutfj_label == 5)
+    # label_Top_bWmv: (scoutfj_label == 6)
+    # label_Top_bWtauev: (scoutfj_label == 7)
+    # label_Top_bWtaumv: (scoutfj_label == 8)
+    # label_Top_bWtauhv: (scoutfj_label == 9)
+    # label_Top_WQQ: ((scoutfj_label >= 10) & (scoutfj_label < 12))
+    # label_Top_Wev: (scoutfj_label == 12)
+    # label_Top_Wmv: (scoutfj_label == 13)
+    # label_Top_Wtauev: (scoutfj_label == 14)
+    # label_Top_Wtaumv: (scoutfj_label == 15)
+    # label_Top_Wtauhv: (scoutfj_label == 16)
     label_H_bb: (scoutfj_label == 17)
     label_H_cc: (scoutfj_label == 18)
     label_H_ss: (scoutfj_label == 19)
@@ -43,7 +43,9 @@ new_variables:
     label_H_tauhtaue: (scoutfj_label == 27)
     label_H_tauhtaum: (scoutfj_label == 28)
     label_H_tauhtauh: (scoutfj_label == 29)
-    label_QCD: (fj_label >= 309) & (fj_label < 314)
+    # label_QCD: (scoutfj_label >= 309) & (scoutfj_label < 314)
+    label_Upsilon3g: (scoutfj_label == 0)
+    label_QCD: (scoutfj_label >= 2) & (scoutfj_label <= 6)
 
     # define "v3 for scouting" labels
     # in the order of actually label for training
@@ -55,18 +57,22 @@ new_variables:
     #  - 11:        H_gg, fj_label=24 (*in v3*: 9)
     #  - 12--16:    H_ee, mm, tauhtaue, tauhtaum, tauhtauh, fj_label=25--29 (*in v3*: 11-15)
     #  - 17--21:    QCD, fj_label=309--313 (*in v3*: 369--373)
+    # fj_label_scout: >-
+    #     ak.where((scoutfj_label >= 17) & (scoutfj_label <= 20) & (scoutfj_gen_pid == 25), scoutfj_label - 17,
+    #     ak.where((scoutfj_label == 21) & (scoutfj_gen_pid > 0), 4,
+    #     ak.where((scoutfj_label == 21) & (scoutfj_gen_pid < 0), 5,
+    #     ak.where((scoutfj_label == 22), 6,
+    #     ak.where((scoutfj_label == 23) & (scoutfj_gen_pid > 0), 7,
+    #     ak.where((scoutfj_label == 23) & (scoutfj_gen_pid < 0), 8,
+    #     ak.where((scoutfj_label == 20) & (scoutfj_gen_pid == 37), 9,
+    #     ak.where((scoutfj_label == 20) & (scoutfj_gen_pid == -37), 10,
+    #     ak.where((scoutfj_label == 24), 11,
+    #     ak.where((scoutfj_label >= 25) & (scoutfj_label <= 29), scoutfj_label - 13,
+    #     ak.where((scoutfj_label >= 309) & (scoutfj_label <= 313), scoutfj_label - 352, 10000)))))))))))
     fj_label_scout: >-
-        ak.where((scoutfj_label >= 17) & (scoutfj_label <= 20) & (scoutfj_gen_pid == 25), scoutfj_label - 17,
-        ak.where((scoutfj_label == 21) & (scoutfj_gen_pid > 0), 4,
-        ak.where((scoutfj_label == 21) & (scoutfj_gen_pid < 0), 5,
-        ak.where((scoutfj_label == 22), 6,
-        ak.where((scoutfj_label == 23) & (scoutfj_gen_pid > 0), 7,
-        ak.where((scoutfj_label == 23) & (scoutfj_gen_pid < 0), 8,
-        ak.where((scoutfj_label == 20) & (scoutfj_gen_pid == 37), 9,
-        ak.where((scoutfj_label == 20) & (scoutfj_gen_pid == -37), 10,
-        ak.where((scoutfj_label == 24), 11,
-        ak.where((scoutfj_label >= 25) & (scoutfj_label <= 29), scoutfj_label - 13,
-        ak.where((scoutfj_label >= 309) & (scoutfj_label <= 313), scoutfj_label - 352, 10000)))))))))))
+        ak.where((scoutfj_label == 0) & (scoutfj_gen_pid == 553), 0,
+        ak.where((scoutfj_label >= 2) & (scoutfj_label <= 6), 17, 10000))
+
 
     # charged and neutral scoutingpfcand
     is_charged: scoutpfcand_charge != 0
@@ -128,8 +134,8 @@ inputs:
             ###              clip_min(optional, default=-5),
             ###              clip_max(optional, default=5),
             ###              pad_value(optional, default=0)]
-            - [cscoutpfcand_pt_log_nopuppi, 1, 0.5]
-            - [cscoutpfcand_e_log_nopuppi, 1.3, 0.5]
+            - [cscoutpfcand_pt_log, 1, 0.5]
+            - [cscoutpfcand_e_log, 1.3, 0.5]
             - cscoutpfcand_etarel
             - cscoutpfcand_phirel
             - [cscoutpfcand_abseta, 0.6, 1.6]
@@ -164,8 +170,8 @@ inputs:
         length: 60
         pad_mode: wrap
         vars:
-            - [nscoutpfcand_pt_log_nopuppi, 1, 0.5]
-            - [nscoutpfcand_e_log_nopuppi, 1.3, 0.5]
+            - [nscoutpfcand_pt_log, 1, 0.5]
+            - [nscoutpfcand_e_log, 1.3, 0.5]
             - nscoutpfcand_etarel
             - nscoutpfcand_phirel
             - [nscoutpfcand_abseta, 0.6, 1.6]
@@ -190,93 +196,93 @@ labels:
     type: custom
     value:
       truth_label: fj_label_scout  # just input the label index
-      target_res_mass_factor: np.where(scoutfj_isQCD, fj_genjet_sdmass, scoutfj_gen_mass) / np.maximum(scoutfj_mass, 1e-6)
-      target_parts_mass_factor: np.where(scoutfj_isQCD, fj_genjet_nomu_sdmass, scoutfj_genparts_mass) / np.maximum(scoutfj_mass, 1e-6)
+      target_res_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_gen_mass) / np.maximum(scoutfj_mass, 1e-6)
+      target_parts_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_genparts_mass) / np.maximum(scoutfj_mass, 1e-6)
 
 observers:
     - event_no
-    - fj_label
-    - fj_label_mod
-    - fj_pt
-    - fj_eta
-    - fj_phi
-    - fj_mass
-    - fj_sdmass
-    - fj_sdmass_fromsubjets
-    - fj_gen_mass
-    - fj_genparts_mass
-    - fj_genjet_sdmass
-    - fj_genjet_nomu_sdmass
+    #- fj_label
+    #- fj_label_mod
+    #- fj_pt
+    #- fj_eta
+    #- fj_phi
+    #- fj_mass
+    #- fj_sdmass
+    #- fj_sdmass_fromsubjets
+    #- fj_gen_mass
+    #- fj_genparts_mass
+    #- fj_genjet_sdmass
+    #- fj_genjet_nomu_sdmass
     - sample_isQCD
-    - pfParticleNetMassRegressionJetTags_mass
-    - pfMassDecorrelatedParticleNetJetTags_probXbb
-    - pfMassDecorrelatedParticleNetJetTags_probXcc
-    - pfMassDecorrelatedParticleNetJetTags_probXqq
-    - pfMassDecorrelatedParticleNetJetTags_probQCDb
-    - pfMassDecorrelatedParticleNetJetTags_probQCDbb
-    - pfMassDecorrelatedParticleNetJetTags_probQCDc
-    - pfMassDecorrelatedParticleNetJetTags_probQCDcc
-    - pfMassDecorrelatedParticleNetJetTags_probQCDothers
-    - pfParticleNetJetTags_probHbb
-    - pfParticleNetJetTags_probHcc
-    - pfParticleNetJetTags_probHqqqq
-    - pfParticleNetJetTags_probQCDb
-    - pfParticleNetJetTags_probQCDbb
-    - pfParticleNetJetTags_probQCDc
-    - pfParticleNetJetTags_probQCDcc
-    - pfParticleNetJetTags_probQCDothers
-    - pfParticleNetJetTags_probTbc
-    - pfParticleNetJetTags_probTbcq
-    - pfParticleNetJetTags_probTbel
-    - pfParticleNetJetTags_probTbmu
-    - pfParticleNetJetTags_probTbq
-    - pfParticleNetJetTags_probTbqq
-    - pfParticleNetJetTags_probTbta
-    - pfParticleNetJetTags_probWcq
-    - pfParticleNetJetTags_probWqq
-    - pfParticleNetJetTags_probZbb
-    - pfParticleNetJetTags_probZcc
-    - pfParticleNetJetTags_probZqq
-    - pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HbbvsQCD
-    - pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HccvsQCD
-    - pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HggvsQCD
-    - pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HqqvsQCD
-    - pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HtevsQCD
-    - pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HtmvsQCD
-    - pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HttvsQCD
-    - pfParticleNetFromMiniAODAK8JetTags_masscorr
-    - pfParticleNetFromMiniAODAK8JetTags_probHbb
-    - pfParticleNetFromMiniAODAK8JetTags_probHcc
-    - pfParticleNetFromMiniAODAK8JetTags_probHgg
-    - pfParticleNetFromMiniAODAK8JetTags_probHqq
-    - pfParticleNetFromMiniAODAK8JetTags_probHte
-    - pfParticleNetFromMiniAODAK8JetTags_probHtm
-    - pfParticleNetFromMiniAODAK8JetTags_probHtt
-    - pfParticleNetFromMiniAODAK8JetTags_probQCD0hf
-    - pfParticleNetFromMiniAODAK8JetTags_probQCD1hf
-    - pfParticleNetFromMiniAODAK8JetTags_probQCD2hf
-    - pfGlobalParticleTransformerAK8JetTags_probXbb
-    - pfGlobalParticleTransformerAK8JetTags_probXcc
-    - pfGlobalParticleTransformerAK8JetTags_probXcs
-    - pfGlobalParticleTransformerAK8JetTags_probXqq
-    - pfGlobalParticleTransformerAK8JetTags_probXWW4q
-    - pfGlobalParticleTransformerAK8JetTags_probXWW3q
-    - pfGlobalParticleTransformerAK8JetTags_probXWWqqev
-    - pfGlobalParticleTransformerAK8JetTags_probXWWqqmv
-    - pfGlobalParticleTransformerAK8JetTags_probXtauhtaue
-    - pfGlobalParticleTransformerAK8JetTags_probXtauhtaum
-    - pfGlobalParticleTransformerAK8JetTags_probXtauhtauh
-    - pfGlobalParticleTransformerAK8JetTags_probTopbWqq
-    - pfGlobalParticleTransformerAK8JetTags_probTopbWq
-    - pfGlobalParticleTransformerAK8JetTags_probTopbWev
-    - pfGlobalParticleTransformerAK8JetTags_probTopbWmv
-    - pfGlobalParticleTransformerAK8JetTags_probTopbWtauhv
-    - pfGlobalParticleTransformerAK8JetTags_probWithMassTopvsQCD
-    - pfGlobalParticleTransformerAK8JetTags_probWithMassWvsQCD
-    - pfGlobalParticleTransformerAK8JetTags_probWithMassZvsQCD
-    - pfGlobalParticleTransformerAK8JetTags_probQCD
-    - pfGlobalParticleTransformerAK8JetTags_massCorrGeneric
-    - pfGlobalParticleTransformerAK8JetTags_massCorrX2p
+    #- pfParticleNetMassRegressionJetTags_mass
+    #- pfMassDecorrelatedParticleNetJetTags_probXbb
+    #- pfMassDecorrelatedParticleNetJetTags_probXcc
+    #- pfMassDecorrelatedParticleNetJetTags_probXqq
+    #- pfMassDecorrelatedParticleNetJetTags_probQCDb
+    #- pfMassDecorrelatedParticleNetJetTags_probQCDbb
+    #- pfMassDecorrelatedParticleNetJetTags_probQCDc
+    #- pfMassDecorrelatedParticleNetJetTags_probQCDcc
+    #- pfMassDecorrelatedParticleNetJetTags_probQCDothers
+    #- pfParticleNetJetTags_probHbb
+    #- pfParticleNetJetTags_probHcc
+    #- pfParticleNetJetTags_probHqqqq
+    #- pfParticleNetJetTags_probQCDb
+    #- pfParticleNetJetTags_probQCDbb
+    #- pfParticleNetJetTags_probQCDc
+    #- pfParticleNetJetTags_probQCDcc
+    #- pfParticleNetJetTags_probQCDothers
+    #- pfParticleNetJetTags_probTbc
+    #- pfParticleNetJetTags_probTbcq
+    #- pfParticleNetJetTags_probTbel
+    #- pfParticleNetJetTags_probTbmu
+    #- pfParticleNetJetTags_probTbq
+    #- pfParticleNetJetTags_probTbqq
+    #- pfParticleNetJetTags_probTbta
+    #- pfParticleNetJetTags_probWcq
+    #- pfParticleNetJetTags_probWqq
+    #- pfParticleNetJetTags_probZbb
+    #- pfParticleNetJetTags_probZcc
+    #- pfParticleNetJetTags_probZqq
+    #- pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HbbvsQCD
+    #- pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HccvsQCD
+    #- pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HggvsQCD
+    #- pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HqqvsQCD
+    #- pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HtevsQCD
+    #- pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HtmvsQCD
+    #- pfParticleNetFromMiniAODAK8DiscriminatorsJetTags_HttvsQCD
+    #- pfParticleNetFromMiniAODAK8JetTags_masscorr
+    #- pfParticleNetFromMiniAODAK8JetTags_probHbb
+    #- pfParticleNetFromMiniAODAK8JetTags_probHcc
+    #- pfParticleNetFromMiniAODAK8JetTags_probHgg
+    #- pfParticleNetFromMiniAODAK8JetTags_probHqq
+    #- pfParticleNetFromMiniAODAK8JetTags_probHte
+    #- pfParticleNetFromMiniAODAK8JetTags_probHtm
+    #- pfParticleNetFromMiniAODAK8JetTags_probHtt
+    #- pfParticleNetFromMiniAODAK8JetTags_probQCD0hf
+    #- pfParticleNetFromMiniAODAK8JetTags_probQCD1hf
+    #- pfParticleNetFromMiniAODAK8JetTags_probQCD2hf
+    #- pfGlobalParticleTransformerAK8JetTags_probXbb
+    #- pfGlobalParticleTransformerAK8JetTags_probXcc
+    #- pfGlobalParticleTransformerAK8JetTags_probXcs
+    #- pfGlobalParticleTransformerAK8JetTags_probXqq
+    #- pfGlobalParticleTransformerAK8JetTags_probXWW4q
+    #- pfGlobalParticleTransformerAK8JetTags_probXWW3q
+    #- pfGlobalParticleTransformerAK8JetTags_probXWWqqev
+    #- pfGlobalParticleTransformerAK8JetTags_probXWWqqmv
+    #- pfGlobalParticleTransformerAK8JetTags_probXtauhtaue
+    #- pfGlobalParticleTransformerAK8JetTags_probXtauhtaum
+    #- pfGlobalParticleTransformerAK8JetTags_probXtauhtauh
+    #- pfGlobalParticleTransformerAK8JetTags_probTopbWqq
+    #- pfGlobalParticleTransformerAK8JetTags_probTopbWq
+    #- pfGlobalParticleTransformerAK8JetTags_probTopbWev
+    #- pfGlobalParticleTransformerAK8JetTags_probTopbWmv
+    #- pfGlobalParticleTransformerAK8JetTags_probTopbWtauhv
+    #- pfGlobalParticleTransformerAK8JetTags_probWithMassTopvsQCD
+    #- pfGlobalParticleTransformerAK8JetTags_probWithMassWvsQCD
+    #- pfGlobalParticleTransformerAK8JetTags_probWithMassZvsQCD
+    #- pfGlobalParticleTransformerAK8JetTags_probQCD
+    #- pfGlobalParticleTransformerAK8JetTags_massCorrGeneric
+    #- pfGlobalParticleTransformerAK8JetTags_massCorrX2p
     # scouting jet features
     - scoutfj_label
     - scoutfj_pt
@@ -293,10 +299,11 @@ observers:
     - scoutfj_gen_deltaR
     - scoutfj_genpart1_pid
     - scoutfj_genpart2_pid
-    - scoutfj_probHbb
-    - scoutfj_probHcc
-    - scoutfj_probHqq
-    - scoutfj_probQCD
+    - scoutfj_genpart3_pid
+    #- scoutfj_probHbb
+    #- scoutfj_probHcc
+    #- scoutfj_probHqq
+    #- scoutfj_probQCD
     - scoutfj_massreg
 
 weights:

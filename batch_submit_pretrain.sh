@@ -13,10 +13,9 @@
 #SBATCH --mail-type=end         # send email when job ends  
 #SBATCH --mail-user=shachar_gottlieb@brown.edu
 
-PREFIX=ak8_MD_inclv10_scouting_Upsilon
+PREFIX=ak8_MD_inclv10_scouting_default
 config=weaver/data_new/UpsilonTo3Gluons/${PREFIX//./_}.yaml
 NGPUS=1
-label_cls_nodes="['label_Upsilon_ggg','label_QCD']"
 load_model="weaver/model/save/2024.pt"
 
 # Change to your conda environment
@@ -27,25 +26,19 @@ conda activate weaver
 # Change model prefix to "--model-prefix weaver/model/${PREFIX}/_best_epoch_state.pt" to train starting from previous best epoch
 # --freeze-model-weights "(.*embed.*|.*blocks.*)" freezes transformer model weights; can be removed for full training
 
-torchrun --standalone --nnodes=1 --nproc_per_node=$NGPUS weaver/train.py \
---run-mode "train,val,test" --train-mode hybrid --in-memory \
--o use_swiglu_config True -o use_pair_norm_config True --seed 42 \
+label_cls_nodes="['label_H_bb','label_H_cc','label_H_ss','label_H_qq','label_H_bc','label_Hp_bc','label_H_bs','label_H_cs','label_Hp_cs','label_Hp_ud','label_Hm_ud','label_H_gg','label_H_ee','label_H_mm','label_H_tauhtaue','label_H_tauhtaum','label_H_tauhtauh','label_QCD_bb','label_QCD_cc','label_QCD_b','label_QCD_c','label_QCD_others']"
+
+torchrun --standalone --nnodes=1 --nproc_per_node=1 weaver/train.py --run-mode "test" \
+-o num_nodes 46 -o num_cls_nodes 22 -o label_cls_nodes ${label_cls_nodes} -o use_swiglu_config True -o use_pair_norm_config True \
 -o fc_params '[(2048,0.1)]' -o embed_dims '[256,1024,256]' -o pair_embed_dims '[64,64,64]' -o num_heads 16 -o num_layers 10 \
--o reg_kw "{'gamma':1.,'composed_split_reg':[True,False],'as_resid_of':[1]}" \
---use-amp --batch-size 512 --start-lr 1e-5 --num-epochs 30 --optimizer ranger --fetch-step 1.0 --num-workers 4 \
---data-train '/users/sgottli4/scratch/Upsilon_modified_mass/run*/deepntuples/job*/DeepNTuples.root' \
-             '/users/sgottli4/scratch/QCD/QCD*/run1/deepntuples/job*/DeepNTuples.root' \
---data-test '/users/sgottli4/scratch/SingleUpsilon/run1/deepntuples/job*/DeepNTuples.root' \
-            '/users/sgottli4/scratch/QCD/QCD*/run1/deepntuples/job*/DeepNTuples.root' \
--o num_nodes 6 -o num_cls_nodes 2 -o label_cls_nodes ${label_cls_nodes} \
---samples-per-epoch 200000 --samples-per-epoch-val 40000 \
---data-config ${config} \
+--use-amp --batch-size 512 --start-lr 7e-4 --num-epochs 30 --optimizer ranger \
+--num-workers 0 --fetch-step 1.0 \
 --network-config weaver/networks/stage3/example_GloParT3_forScouting.py \
---model-prefix weaver/model/${PREFIX}/ \
+--data-test '/users/sgottli4/scratch/SingleUpsilon/run1/deepntuples/job*/DeepNTuples.root' \
+'/users/sgottli4/scratch/QCD/QCD*/run1/deepntuples/job*/DeepNTuples.root' \
+--data-config weaver/data_new/inclv10_aux/ak8_MD_inclv10_scouting_2p.yaml \
+--model-prefix weaver/model/save/2024.pt \
 --log-file $HOME/scratch/logs/${PREFIX}/train.log \
 --tensorboard _${PREFIX} \
---predict-output $HOME/scratch/predict/$PREFIX/pred.root \
---load-model-weights ${load_model} --exclude-model-weights 'part.fc' \
---freeze-model-weights "(.*embed.*|.*blocks\.[0-6]\..*)" 
-
-# '/users/sgottli4/scratch/SingleUpsilon/run1/deepntuples/job*/DeepNTuples.root'
+--predict-output $HOME/scratch/predict/default_config/pred.root \
+--predict
