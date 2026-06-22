@@ -86,8 +86,15 @@ def _preprocess(table, data_config, options):
     table = _apply_selection(table, data_config.selection if options['training'] else data_config.test_time_selection)
     if len(table) == 0:
         return []
+    _logger.info(f"==> Post-cut chunk size: {len(table)} events passed the selection.")
     # define new variables
     table = _build_new_variables(table, data_config.var_funcs)
+    try:
+        num_sig = ak.sum(table['label_Upsilon3g'])
+        num_bkg = ak.sum(table['label_QCD'])
+        _logger.info(f"    Raw chunk breakdown: Signal = {num_sig}, Background = {num_bkg}")
+    except Exception:
+        pass
     # check labels
     if data_config.label_type in ['simple', 'hybrid'] and options['training']:
         _check_labels(table)
@@ -181,7 +188,8 @@ class _SimpleIter(object):
             if self.split_num > 1:
                 raise ValueError('Cannot fetch by files when split_num > 1')
             self.load_filelist_and_ranges = [
-                (self.filelist[i: i + self._fetch_step], [self.load_range] * self._fetch_step) for i in range(0, len(self.filelist), self._fetch_step)]
+                (self.filelist[i: i + int(self._fetch_step)], [self.load_range] * int(self._fetch_step)) for i in range(0, len(self.filelist), int(self._fetch_step))]
+                # (self.filelist[i: i + self._fetch_step], [self.load_range] * self._fetch_step) for i in range(0, len(self.filelist), self._fetch_step)]
         else:
             self.load_filelist_and_ranges = []
             # for n files with split_num=d, return the loading status for n files

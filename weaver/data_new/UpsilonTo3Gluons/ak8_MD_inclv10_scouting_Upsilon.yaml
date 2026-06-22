@@ -3,15 +3,18 @@
 
 # to select scouting jets, ensure that QCD scouting jets from the resonant (signal) samples are not included (they are not excluded in the samples; only reco QCD jets are excluded)
 selection: >-
-    (scoutfj_pt>25) & (scoutfj_pt<5000) & (scoutfj_sdmass>0) & (scoutfj_sdmass<650) & (ak.num(scoutpfcand_px) > 0) &
+    (scoutfj_pt>25) & (scoutfj_pt<600) & (scoutfj_sdmass>5) & (scoutfj_sdmass<100) & (ak.num(scoutpfcand_px) > 0) &
     (
-      ((sample_isQCD==1) & (scoutfj_label >= 2) & (scoutfj_label <= 6) & (event_no%10 <= 7)) |
-      ((sample_isQCD==0) & (scoutfj_isQCD==0))
+      ((sample_isQCD==1) & (scoutfj_label >= 2) & (scoutfj_label <= 6) & (event_no%10 <= 3)) |
+      ((sample_isQCD==0) & (scoutfj_isQCD==0) & (event_no%10 <= 7))
     ) 
 
 ### selection to apply at test time (i.e., when running w/ --predict)
 test_time_selection: >-
-    (scoutfj_pt>25) & (event_no%10 > 7)
+    (
+      ((sample_isQCD==1) & (event_no%10 > 7)) |
+      ((sample_isQCD==0) & (scoutfj_isQCD==0) & ((scoutfj_gen_mass == 9.46875) | (event_no%10 > 7)))
+    )
 
 new_variables:
     ### [format] name: formula
@@ -29,6 +32,7 @@ new_variables:
         ak.where((scoutfj_label >= 2) & (scoutfj_label <= 6), 1, 10000))
 
     reweight_mass: np.where(sample_isQCD, scoutfj_genjet_mass, scoutfj_gen_mass)
+    scoutfj_pt_log: np.log(scoutfj_pt)
 
     # charged and neutral scoutingpfcand
     is_charged: scoutpfcand_charge != 0
@@ -152,8 +156,8 @@ labels:
     type: custom
     value:
       truth_label: fj_label_scout  # just input the label index
-      target_res_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_gen_mass) / np.maximum(scoutfj_mass, 1e-6)
-      target_parts_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_genparts_mass) / np.maximum(scoutfj_mass, 1e-6)
+      target_res_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_gen_mass) / np.maximum(scoutfj_sdmass, 1e-6)
+      target_parts_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_genparts_mass) / np.maximum(scoutfj_sdmass, 1e-6)
 
 observers:
     - event_no
@@ -207,29 +211,31 @@ weights:
     - 1
     - 1
   reweight_vars:
-    scoutfj_pt:
-      - 25
-      - 40
-      - 50
-      - 60
-      - 70
-      - 80
-      - 90
-      - 100
-      - 110
-      - 125
-      - 150
-      - 185
-      - 220
-      - 270
-      - 320
-      - 400
-      - 500
-      - 600
+    scoutfj_pt_log:
+      - 3.2
+      - 3.4
+      - 3.6
+      - 3.8
+      - 4.0
+      - 4.2
+      - 4.4
+      - 4.6
+      - 4.8
+      - 5.0
+      - 5.2
+      - 5.4
+      - 5.6
+      - 5.8
+      - 6.0
+      - 6.2
+      - 6.4
     reweight_mass:
       - 5
+      - 5.5
       - 6
+      - 6.5 
       - 7
+      - 7.5
       - 8
       - 9
       - 10
@@ -237,16 +243,14 @@ weights:
       - 12
       - 13
       - 14
-      - 15
+      - 15  
       - 16
       - 17
       - 18
       - 19
       - 20
-      - 21
-      - 22
-      - 23
-      - 24
-      - 25  
-  
-
+      # - 21
+      # - 22
+      # - 23
+      # - 24 
+      # - 25

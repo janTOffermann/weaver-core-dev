@@ -31,14 +31,15 @@ label_cls_nodes="['label_H_bb','label_H_cc','label_H_ss','label_H_qq','label_H_b
 torchrun --standalone --nnodes=1 --nproc_per_node=1 weaver/train.py --run-mode "test" \
 -o num_nodes 46 -o num_cls_nodes 22 -o label_cls_nodes ${label_cls_nodes} -o use_swiglu_config True -o use_pair_norm_config True \
 -o fc_params '[(2048,0.1)]' -o embed_dims '[256,1024,256]' -o pair_embed_dims '[64,64,64]' -o num_heads 16 -o num_layers 10 \
---use-amp --batch-size 512 --start-lr 7e-4 --num-epochs 30 --optimizer ranger \
---num-workers 0 --fetch-step 1.0 \
+-o export_params "{'apply_softmax': True, 'num_cls': 22, 'compress_outputs': False}" \
+--num-workers 0 --fetch-step 0.1 \
 --network-config weaver/networks/stage3/example_GloParT3_forScouting.py \
---data-test '/users/sgottli4/scratch/SingleUpsilon/run1/deepntuples/job*/DeepNTuples.root' \
-'/users/sgottli4/scratch/QCD/QCD*/run1/deepntuples/job*/DeepNTuples.root' \
+--data-test '/HEP/export/home/sgottli4/CMSSW_15_0_4/src/UpsilonTo3Gluons/mc/SingleUpsilon/run3/deepntuples/job*/DeepNTuples.root' \
+            '/HEP/export/home/sgottli4/CMSSW_15_0_4/src/UpsilonTo3Gluons/mc/QCD/QCD*/run3/deepntuples/job*/DeepNTuples.root' \
 --data-config weaver/data_new/inclv10_aux/ak8_MD_inclv10_scouting_2p.yaml \
 --model-prefix weaver/model/save/2024.pt \
 --log-file $HOME/scratch/logs/${PREFIX}/train.log \
 --tensorboard _${PREFIX} \
 --predict-output $HOME/scratch/predict/default_config/pred.root \
 --predict
+# --export-onnx $HOME/scratch/onnx/2024_scouting.onnx
