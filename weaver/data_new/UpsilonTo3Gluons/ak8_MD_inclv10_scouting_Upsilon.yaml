@@ -3,17 +3,19 @@
 
 # to select scouting jets, ensure that QCD scouting jets from the resonant (signal) samples are not included (they are not excluded in the samples; only reco QCD jets are excluded)
 selection: >-
-    (scoutfj_pt>25) & (scoutfj_pt<600) & (scoutfj_sdmass>5) & (scoutfj_sdmass<100) & (ak.num(scoutpfcand_px) > 0) &
+    (scoutfj_pt>40) & (scoutfj_pt<300) & (scoutfj_sdmass>0) & (scoutfj_sdmass<50) & (ak.num(scoutpfcand_px) > 0) &
     (
-      ((sample_isQCD==1) & (scoutfj_label >= 2) & (scoutfj_label <= 6) & (event_no%10 <= 3)) |
-      ((sample_isQCD==0) & (scoutfj_isQCD==0) & (event_no%10 <= 7))
-    ) 
+      ((sample_isQCD==1) & (scoutfj_label >= 2) & (scoutfj_label <= 6) & (event_no%10 <= 1)) |
+      ((sample_isQCD==0) & (scoutfj_isQCD==0) & (scoutfj_gen_mass >= 5) & (scoutfj_gen_mass <= 20)))
+
+# & (np.sqrt(np.power(scoutfj_gen_mass, 2) + np.power(scoutfj_gen_pt, 2))/scoutfj_energy > 0.8))
 
 ### selection to apply at test time (i.e., when running w/ --predict)
-test_time_selection: >-
+test_time_selection: >- 
+    (scoutfj_pt>25) & (scoutfj_pt<400) & 
     (
       ((sample_isQCD==1) & (event_no%10 > 7)) |
-      ((sample_isQCD==0) & (scoutfj_isQCD==0) & ((scoutfj_gen_mass == 9.46875) | (event_no%10 > 7)))
+      ((sample_isQCD==0) & (scoutfj_isQCD==0))
     )
 
 new_variables:
@@ -28,11 +30,16 @@ new_variables:
     #  - 0:      Upsilon->3g, fj_label=0 
     #  - 1-4:    QCD, fj_label=2-6 
     fj_label_scout: >-
-        ak.where((scoutfj_label == 0) & (scoutfj_gen_pid == 553), 0,
+        ak.where((scoutfj_label == 0) & ((scoutfj_gen_pid == 553) | (scoutfj_gen_pid == 100553) | (scoutfj_gen_pid == 200553)), 0,
         ak.where((scoutfj_label >= 2) & (scoutfj_label <= 6), 1, 10000))
 
     reweight_mass: np.where(sample_isQCD, scoutfj_genjet_mass, scoutfj_gen_mass)
     scoutfj_pt_log: np.log(scoutfj_pt)
+    has_hard_genjet: >-
+        np.where(sample_isQCD,
+            (scoutfj_genjet_mass > 0),     # QCD: require matched genjet
+            np.ones_like(scoutfj_sdmass)   # signal: always valid
+        )
 
     # charged and neutral scoutingpfcand
     is_charged: scoutpfcand_charge != 0
@@ -156,13 +163,15 @@ labels:
     type: custom
     value:
       truth_label: fj_label_scout  # just input the label index
-      target_res_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_gen_mass) / np.maximum(scoutfj_sdmass, 1e-6)
-      target_parts_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_genparts_mass) / np.maximum(scoutfj_sdmass, 1e-6)
+      target_res_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_gen_mass) / np.maximum(scoutfj_mass, 1e-6)
+      # target_parts_mass_factor: np.where(scoutfj_isQCD, scoutfj_genjet_mass, scoutfj_genparts_mass) / np.maximum(scoutfj_sdmass, 1e-6)
 
 observers:
     - event_no
     - sample_isQCD
-    - reweight_mass
+    - sample_forTraining
+    - has_hard_genjet
+    # - reweight_mass
     # scouting jet features
     - scoutfj_label
     - scoutfj_pt
@@ -176,6 +185,7 @@ observers:
     - scoutfj_gen_phi
     - scoutfj_gen_mass
     - scoutfj_gen_pid
+    - scoutfj_genjet_mass 
     - scoutfj_gen_deltaR
     - scoutfj_gendau1_pt
     - scoutfj_gendau1_eta
@@ -200,6 +210,7 @@ observers:
     # - scoutfj_probHqq
     - scoutfj_probQCD
     - scoutfj_massreg
+    - nscoutpfcand_pt
 
 weights:
   use_precomputed_weights: false
@@ -211,46 +222,30 @@ weights:
     - 1
     - 1
   reweight_vars:
-    scoutfj_pt_log:
-      - 3.2
-      - 3.4
-      - 3.6
-      - 3.8
-      - 4.0
-      - 4.2
-      - 4.4
-      - 4.6
-      - 4.8
-      - 5.0
-      - 5.2
-      - 5.4
-      - 5.6
-      - 5.8
-      - 6.0
-      - 6.2
-      - 6.4
-    reweight_mass:
+    scoutfj_pt:
+      - 40
+      - 60
+      - 80
+      - 100
+      - 120
+      - 160
+      - 200
+      - 250
+      - 300
+ 
+    # reweight_mass:
+    scoutfj_sdmass:
+      - 0
       - 5
-      - 5.5
-      - 6
-      - 6.5 
       - 7
-      - 7.5
-      - 8
       - 9
-      - 10
-      - 11
       - 12
-      - 13
       - 14
-      - 15  
       - 16
-      - 17
-      - 18
-      - 19
       - 20
-      # - 21
-      # - 22
-      # - 23
-      # - 24 
-      # - 25
+      - 24
+      - 28
+      - 32
+      - 36
+      - 40
+      - 50
