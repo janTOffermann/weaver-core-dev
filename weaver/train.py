@@ -390,9 +390,8 @@ def flops(model, model_info):
         torch.ones(model_info['input_shapes'][k], dtype=torch.float32) for k in model_info['input_names'])
 
     macs, params = get_model_complexity_info(model, inputs, as_strings=True, print_per_layer_stat=True, verbose=True)
-    _logger.info('{:<30}  {:<8}'.format('Computational complexity: ', macs))
-    _logger.info('{:<30}  {:<8}'.format('Number of parameters: ', params))
-
+    _logger.info('{:<30}  {}'.format('Computational complexity: ', macs))
+    _logger.info('{:<30}  {}'.format('Number of parameters: ', params))
 
 def profile(args, model, model_info, device):
     """
@@ -623,7 +622,7 @@ def model_setup(args, data_config):
             if args.load_model_weights == 'finetune_stage2.0': # only takes the params 0-th layer after ft layer
                 state_dict[f'ft_mlp.0.0.weight'].copy_(model_state[f'part.fc.0.0.weight'].data)
                 state_dict[f'ft_mlp.0.0.bias'].copy_(model_state[f'part.fc.0.0.bias'].data)
-            elif args.load_model_weights == 'finetune_stage2.all': # take all layers after ft nodes 
+            elif args.load_model_weights == 'finetune_stage2.all': # take all layers after ft nodes
                 state_dict[f'ft_mlp.0.0.weight'].copy_(model_state[f'part.fc.0.0.weight'].data)
                 state_dict[f'ft_mlp.0.0.bias'].copy_(model_state[f'part.fc.0.0.bias'].data)
                 state_dict[f'ft_mlp.1.0.weight'].copy_(model_state[f'part.fc.1.weight'].data)
@@ -707,7 +706,7 @@ def model_setup(args, data_config):
                 if key.startswith('m_weight.'):
                     state_dict[key].copy_(weight_model_state[key.replace('m_weight.', '')].data)
                     print(f'Copy weight model params: {key}')
-        
+
         # for stage3 model
         elif args.load_model_weights.startswith('finetune_stage3'):
             if args.load_model_weights == 'finetune_stage3beta4':
@@ -941,7 +940,7 @@ def _main(args):
     else:
         gpus = None
         dev = torch.device('cpu')
-    
+
     # torch configs
     if torch.__version__.startswith('2.'):
         torch.set_float32_matmul_precision('high')
@@ -1079,7 +1078,7 @@ def _main(args):
                 if valid_metric - train_loss > args.early_stop_dlr:
                     _logger.info('Early stop at epoch %d' % epoch)
                     break
-            
+
             if args.use_last_model:
                 if args.model_prefix and (args.backend is None or local_rank == 0):
                     shutil.copy2(args.model_prefix + '_epoch-%d_state.pt' %
@@ -1163,7 +1162,7 @@ def main():
     if args.data_split_group > 1:
         assert args.data_split_num == 1
         args.data_split_num = args.data_split_group
-    
+
     if args.extra_selection is not None:
         assert all(getattr(args, n) is None for n in ['extra_selection_train', 'extra_selection_val', 'extra_selection_test']), \
             'Cannot use both `--extra-selection` and `--extra-selection-{train,val,test}`'

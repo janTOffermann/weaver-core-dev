@@ -939,7 +939,7 @@ class ParticleTransformer(nn.Module):
                     output_cls = torch.softmax(output_cls, dim=1)
                     # output_rest = torch.nn.functional.softplus(output_rest)
                     #output = torch.cat([output_cls, output_rest], dim=-1)
-                    
+
                     # prob_indices = {
                     #     'probXbb': 0, 'probXcc': 1, 'probXss': 2, 'probXqq': 3,
                     #     'probXpbc': 4, 'probXmbc': 5, 'probXbs': 6,
@@ -950,7 +950,7 @@ class ParticleTransformer(nn.Module):
                     # }
                     prob_indices = {
                         'probUpsilon': 0, 'probQCD': 1
-                    } 
+                    }
 
                     # 1. QCD总概率
                     # prob_QCD = (
@@ -1002,14 +1002,14 @@ class ParticleTransformer(nn.Module):
                     # ===== 质量校正特征处理 =====
                     # 定义mass校正特征索引（需与输入顺序严格对应）
                     # mass_corr_indices = {
-                    #     'massCorrResonance': 0, 'massCorrGeneric': 1, 
-                    #     'massCorrXbb': 2, 'massCorrXcc': 3, 'massCorrXss': 4, 
+                    #     'massCorrResonance': 0, 'massCorrGeneric': 1,
+                    #     'massCorrXbb': 2, 'massCorrXcc': 3, 'massCorrXss': 4,
                     #     'massCorrXqq': 5, 'massCorrXpbc': 6, 'massCorrXmbc': 7,
                     #     'massCorrXbs': 8, 'massCorrXpcs': 9, 'massCorrXmcs': 10,
                     #     'massCorrXpud': 11, 'massCorrXmud': 12, 'massCorrXgg': 13,
                     #     'massCorrXee': 14, 'massCorrXmm': 15, 'massCorrXtauhtaue': 16,
                     #     'massCorrXtauhtaum': 17, 'massCorrXtauhtauh': 18,
-                    #     'massCorrQCDbb': 19, 'massCorrQCDcc': 20, 
+                    #     'massCorrQCDbb': 19, 'massCorrQCDcc': 20,
                     #     'massCorrQCDb': 21, 'massCorrQCDc': 22, 'massCorrQCDothers': 23
                     # }
                     mass_corr_indices = {
@@ -1066,7 +1066,7 @@ class ParticleTransformer(nn.Module):
                     #     output_rest[:, [mass_corr_indices['massCorrGeneric']]] + numeratorW / prob_Wsum,
                     #     output_rest[:, [mass_corr_indices['massCorrGeneric']]]
                     # )
-    
+
                     # massCorr_Upsilon = (
                     #     output_rest[:, [mass_corr_indices['massCorrGeneric']]] +
                     #     output_rest[:, [mass_corr_indices['massCorrUpsilon']]]
@@ -1087,11 +1087,11 @@ class ParticleTransformer(nn.Module):
                     selected_mass_corr = torch.cat([
                         output_rest[:, [mass_corr_indices['massCorrResonance']]]
                     ])
-                    
+
                     # ===== 最终输出合并 =====
                     # output = torch.cat([new_probs, selected_mass_corr], dim=1)  # 15 + 4 = 19个特征
                     output = torch.cat([probs, selected_mass_corr], dim=1)
-                    
+
                 if self.export_params.get('concat_hid', False):
                     output = torch.cat([output, x_cls], dim=-1)
 
@@ -1228,7 +1228,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
             input_dims.append(7)
         else:
             self.num_colls = len(input_dims)
-        
+
         self.share_embed = share_embed
         self.trimmers = nn.ModuleList()
         self.input_embeds = nn.ModuleList()
@@ -1288,7 +1288,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                 print(f"pf_features: {pf_features.shape}")
                 print(f"pf_vectors : {pf_vectors.shape}")
                 print(f"pf_mask    : {pf_mask.shape}\n")
-                
+
                 print("前5个粒子的原始数据:")
                 for p in range(P):
                     valid = pf_mask[batch_idx, 0, p].item()
@@ -1304,7 +1304,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                 neutral_feats_list = []
                 neutral_vecs_list = []
                 neutral_masks_list = []
-                
+
                 # 对每个样本仅循环一次
                 for i in range(batch_size):
                     feat = pf_features[i]  # 形状: (通道数, P)，例如(28, P)
@@ -1313,7 +1313,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                     mask_sample = pf_mask[i, 0, :]
                     # 根据通道1及原始 mask 判断带电粒子（同时保证对应pf_mask有效）
                     is_charged = (feat[1] != 0) & (mask_sample != 0)
-                    
+
                     # ----------------------- 带电粒子部分 -----------------------
                     c_pt_log       = feat[10][is_charged]
                     c_e_log        = feat[19][is_charged]
@@ -1344,7 +1344,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                     # 使用原始mask信息过滤，保持有效粒子的mask（形状: (1, num_charged)）
                     charged_mask = mask_sample[is_charged].unsqueeze(0)
                     # ------------------------------------------------------------
-                    
+
                     # ----------------------- 中性粒子部分 -----------------------
                     n_pt_log       = feat[10][~is_charged]
                     n_e_log        = feat[19][~is_charged]
@@ -1360,14 +1360,14 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                     # 同样使用原始mask过滤
                     neutral_mask = mask_sample[~is_charged].unsqueeze(0)
                     # ------------------------------------------------------------
-                    
+
                     charged_feats_list.append(charged_feats)
                     charged_vecs_list.append(charged_vecs)
                     charged_masks_list.append(charged_mask)
                     neutral_feats_list.append(neutral_feats)
                     neutral_vecs_list.append(neutral_vecs)
                     neutral_masks_list.append(neutral_mask)
-                
+
                 # ----------------------- 对各部分进行填充 -----------------------
                 # 带电部分：固定填充到长度90
                 padded_charged_feats = []
@@ -1380,7 +1380,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                         t_padded = t[:, :90]
                     padded_charged_feats.append(t_padded)
                 charged_feats_padded = torch.stack(padded_charged_feats, dim=0)  # (N, 19, 90)
-                
+
                 padded_charged_vecs = []
                 for t in charged_vecs_list:
                     cur_len = t.size(1)
@@ -1391,7 +1391,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                         t_padded = t[:, :90]
                     padded_charged_vecs.append(t_padded)
                 charged_vecs_padded = torch.stack(padded_charged_vecs, dim=0)  # (N, 4, 90)
-                
+
                 padded_charged_masks = []
                 for t in charged_masks_list:
                     cur_len = t.size(1)
@@ -1402,7 +1402,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                         t_padded = t[:, :90]
                     padded_charged_masks.append(t_padded)
                 charged_masks_padded = torch.stack(padded_charged_masks, dim=0)  # (N, 1, 90)
-                
+
                 # 中性部分：固定填充到长度60
                 padded_neutral_feats = []
                 for t in neutral_feats_list:
@@ -1414,7 +1414,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                         t_padded = t[:, :60]
                     padded_neutral_feats.append(t_padded)
                 neutral_feats_padded = torch.stack(padded_neutral_feats, dim=0)  # (N, 7, 60)
-                
+
                 padded_neutral_vecs = []
                 for t in neutral_vecs_list:
                     cur_len = t.size(1)
@@ -1425,7 +1425,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                         t_padded = t[:, :60]
                     padded_neutral_vecs.append(t_padded)
                 neutral_vecs_padded = torch.stack(padded_neutral_vecs, dim=0)  # (N, 4, 60)
-                
+
                 padded_neutral_masks = []
                 for t in neutral_masks_list:
                     cur_len = t.size(1)
@@ -1447,7 +1447,7 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                 print("前5个带电粒子特征（处理后）:")
                 for p in range(charged_feats_np.shape[1]):
                     print(f"位置 {p}: mask={charged_masks_np[0, p]}, 特征={charged_feats_np[:, p]}")
-                
+
                 # 中性部分
                 neutral_feats_np = neutral_feats_padded[batch_idx].detach().cpu().numpy()
                 neutral_masks_np = neutral_masks_padded[batch_idx].detach().cpu().numpy()
@@ -1455,11 +1455,11 @@ class ParticleTransformerTagger_ncoll(nn.Module):
                 print("前5个中性粒子特征（处理后）:")
                 for p in range(neutral_feats_np.shape[1]):
                     print(f"位置 {p}: mask={neutral_masks_np[0, p]}, 特征={neutral_feats_np[:, p]}")
-                
+
                 print("====================================\n")
                 # ----------------------------------------------------------------------
                 '''
-                
+
                 new_args = [
                     charged_feats_padded, charged_vecs_padded, charged_masks_padded,
                     neutral_feats_padded, neutral_vecs_padded, neutral_masks_padded

@@ -1,0 +1,13 @@
+python weaver/train.py \
+  --gpus '' \
+  -o export_params "{'apply_softmax': True, 'num_cls': 22, 'compress_outputs': False}" \
+  --run-mode export_onnx \
+  --export-onnx weaver/model/save/2024_scouting.onnx \
+  --data-config weaver/data_new/inclv10_aux/ak8_MD_inclv10_scouting_2p.yaml \
+  --network-config weaver/networks/stage3/example_GloParT3_forScouting.py \
+  --model-prefix weaver/model/save/2024.pt \
+  -o use_swiglu_config True -o use_pair_norm_config True \
+  -o fc_params '[(2048,0.1)]' -o embed_dims '[256,1024,256]' \
+  -o pair_embed_dims '[64,64,64]' -o num_heads 16 -o num_layers 10 \
+  -o num_nodes 46 -o num_cls_nodes 22 \
+  -o label_cls_nodes "['label_H_bb','label_H_cc','label_H_ss','label_H_qq','label_H_bc','label_Hp_bc','label_H_bs','label_H_cs','label_Hp_cs','label_Hp_ud','label_Hm_ud','label_H_gg','label_H_ee','label_H_mm','label_H_tauhtaue','label_H_tauhtaum','label_H_tauhtauh','label_QCD_bb','label_QCD_cc','label_QCD_b','label_QCD_c','label_QCD_others']"
