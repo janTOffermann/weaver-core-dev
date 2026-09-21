@@ -542,14 +542,16 @@ class Attention(torch.nn.Module):
 
         # merge key padding and attention masks
         if key_padding_mask is not None:
-            assert key_padding_mask.shape == (bsz, src_len), \
-                f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
+            if not torch.jit.is_tracing():
+                assert key_padding_mask.shape == (bsz, src_len), \
+                    f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
             key_padding_mask = key_padding_mask.view(bsz, 1, 1, src_len).expand(-1, self.num_heads, -1, -1)
             if attn_mask is None:
                 attn_mask = key_padding_mask
             else:
-                assert attn_mask.shape == (bsz, self.num_heads, tgt_len, src_len), \
-                    f"expecting key_padding_mask shape of {(bsz, self.num_heads, tgt_len, src_len)}, but got {key_padding_mask.shape}"
+                if not torch.jit.is_tracing():
+                    assert attn_mask.shape == (bsz, self.num_heads, tgt_len, src_len), \
+                        f"expecting key_padding_mask shape of {(bsz, self.num_heads, tgt_len, src_len)}, but got {key_padding_mask.shape}"
                 attn_mask = attn_mask + key_padding_mask
 
         # (bsz, seq_len, num_heads*head_dim)
@@ -883,8 +885,9 @@ class ParticleTransformer(nn.Module):
                 cls_tokens = self.cls_token.expand(x.size(0), -1, -1)  # (batch, num_cls_token, embed_dim)
                 for block in self.cls_blocks:
                     cls_tokens = block(x, x_cls=cls_tokens, padding_mask=padding_mask)  # (batch, num_cls_token, embed_dim)
-                if cls_tokens.size(1) == 1:
-                    cls_tokens = cls_tokens.squeeze(1)  # (batch, embed_dim)
+                # if cls_tokens.size(1) == 1:
+                #     cls_tokens = cls_tokens.squeeze(1)  # (batch, embed_dim)
+                cls_tokens = cls_tokens.reshape(cls_tokens.size(0), -1)
             else:
                 # for classification: simple average pooling
                 mask = ~padding_mask.unsqueeze(1)  # (batch, 1, seq_len)
@@ -934,129 +937,160 @@ class ParticleTransformer(nn.Module):
                     num_cls = self.export_params.get('num_cls', output.size(1))
                     output_cls, output_rest = output.split([num_cls, output.size(1) - num_cls], dim=1)
                     output_cls = torch.softmax(output_cls, dim=1)
+                    # output_rest = torch.nn.functional.softplus(output_rest)
                     #output = torch.cat([output_cls, output_rest], dim=-1)
                     
+                    # prob_indices = {
+                    #     'probXbb': 0, 'probXcc': 1, 'probXss': 2, 'probXqq': 3,
+                    #     'probXpbc': 4, 'probXmbc': 5, 'probXbs': 6,
+                    #     'probXpcs': 7, 'probXmcs': 8, 'probXpud': 9, 'probXmud': 10,
+                    #     'probXgg': 11, 'probXee': 12, 'probXmm': 13,
+                    #     'probXtauhtaue': 14, 'probXtauhtaum': 15, 'probXtauhtauh': 16,
+                    #     'probQCDbb': 17, 'probQCDcc': 18, 'probQCDb': 19, 'probQCDc': 20, 'probQCDothers': 21
+                    # }
                     prob_indices = {
-                        'probXbb': 0, 'probXcc': 1, 'probXss': 2, 'probXqq': 3,
-                        'probXpbc': 4, 'probXmbc': 5, 'probXbs': 6,
-                        'probXpcs': 7, 'probXmcs': 8, 'probXpud': 9, 'probXmud': 10,
-                        'probXgg': 11, 'probXee': 12, 'probXmm': 13,
-                        'probXtauhtaue': 14, 'probXtauhtaum': 15, 'probXtauhtauh': 16,
-                        'probQCDbb': 17, 'probQCDcc': 18, 'probQCDb': 19, 'probQCDc': 20, 'probQCDothers': 21
-                    }
+                        'probUpsilon': 0, 'probQCD': 1
+                    } 
 
                     # 1. QCD总概率
+                    # prob_QCD = (
+                    #     output_cls[:, [prob_indices['probQCDbb']]] +
+                    #     output_cls[:, [prob_indices['probQCDcc']]] +
+                    #     output_cls[:, [prob_indices['probQCDb']]] +
+                    #     output_cls[:, [prob_indices['probQCDc']]] +
+                    #     output_cls[:, [prob_indices['probQCDothers']]]
+                    # )
                     prob_QCD = (
-                        output_cls[:, [prob_indices['probQCDbb']]] +
-                        output_cls[:, [prob_indices['probQCDcc']]] +
-                        output_cls[:, [prob_indices['probQCDb']]] +
-                        output_cls[:, [prob_indices['probQCDc']]] +
-                        output_cls[:, [prob_indices['probQCDothers']]]
+                        output_cls[:, [prob_indices['probQCD']]]
+                    )
+                    prob_Upsilon = (
+                        output_cls[:, [prob_indices['probUpsilon']]]
                     )
 
-                    # 2. X->bc (Xpbc + Xmbc)
-                    prob_Xbc = output_cls[:, [prob_indices['probXpbc']]] + output_cls[:, [prob_indices['probXmbc']]]
+                    # # 2. X->bc (Xpbc + Xmbc)
+                    # prob_Xbc = output_cls[:, [prob_indices['probXpbc']]] + output_cls[:, [prob_indices['probXmbc']]]
 
-                    # 3. X->cs (Xpcs + Xmcs)
-                    prob_Xcs = output_cls[:, [prob_indices['probXpcs']]] + output_cls[:, [prob_indices['probXmcs']]]
+                    # # 3. X->cs (Xpcs + Xmcs)
+                    # prob_Xcs = output_cls[:, [prob_indices['probXpcs']]] + output_cls[:, [prob_indices['probXmcs']]]
 
-                    # 4. X->ud (Xpud + Xmud)
-                    prob_Xud = output_cls[:, [prob_indices['probXpud']]] + output_cls[:, [prob_indices['probXmud']]]
+                    # # 4. X->ud (Xpud + Xmud)
+                    # prob_Xud = output_cls[:, [prob_indices['probXpud']]] + output_cls[:, [prob_indices['probXmud']]]
 
-                    # 5. 其他单变量概率
-                    selected_probs = torch.cat([
-                        output_cls[:, [prob_indices['probXbb']]],     # Xbb
-                        output_cls[:, [prob_indices['probXcc']]],     # Xcc
-                        output_cls[:, [prob_indices['probXss']]],     # Xss
-                        output_cls[:, [prob_indices['probXqq']]],     # Xqq
-                        output_cls[:, [prob_indices['probXbs']]],     # Xbs
-                        output_cls[:, [prob_indices['probXgg']]],     # Xgg
-                        output_cls[:, [prob_indices['probXee']]],     # Xee
-                        output_cls[:, [prob_indices['probXmm']]],     # Xmm
-                        output_cls[:, [prob_indices['probXtauhtaue']]], # Xtauhtaue
-                        output_cls[:, [prob_indices['probXtauhtaum']]], # Xtauhtaum
-                        output_cls[:, [prob_indices['probXtauhtauh']]], # Xtauhtauh
+                    # # 5. 其他单变量概率
+                    # selected_probs = torch.cat([
+                    #     output_cls[:, [prob_indices['probXbb']]],     # Xbb
+                    #     output_cls[:, [prob_indices['probXcc']]],     # Xcc
+                    #     output_cls[:, [prob_indices['probXss']]],     # Xss
+                    #     output_cls[:, [prob_indices['probXqq']]],     # Xqq
+                    #     output_cls[:, [prob_indices['probXbs']]],     # Xbs
+                    #     output_cls[:, [prob_indices['probXgg']]],     # Xgg
+                    #     output_cls[:, [prob_indices['probXee']]],     # Xee
+                    #     output_cls[:, [prob_indices['probXmm']]],     # Xmm
+                    #     output_cls[:, [prob_indices['probXtauhtaue']]], # Xtauhtaue
+                    #     output_cls[:, [prob_indices['probXtauhtaum']]], # Xtauhtaum
+                    #     output_cls[:, [prob_indices['probXtauhtauh']]], # Xtauhtauh
+                    # ], dim=1)
+
+                    # # 合并所有概率特征
+                    # new_probs = torch.cat([
+                    #     prob_QCD, selected_probs, prob_Xbc, prob_Xcs, prob_Xud
+                    # ], dim=1)  # 总特征数 1 + 11 + 1 + 1 + 1 = 15
+                    probs = torch.cat([
+                        prob_QCD, prob_Upsilon
                     ], dim=1)
-
-                    # 合并所有概率特征
-                    new_probs = torch.cat([
-                        prob_QCD, selected_probs, prob_Xbc, prob_Xcs, prob_Xud
-                    ], dim=1)  # 总特征数 1 + 11 + 1 + 1 + 1 = 15
 
                     # ===== 质量校正特征处理 =====
                     # 定义mass校正特征索引（需与输入顺序严格对应）
+                    # mass_corr_indices = {
+                    #     'massCorrResonance': 0, 'massCorrGeneric': 1, 
+                    #     'massCorrXbb': 2, 'massCorrXcc': 3, 'massCorrXss': 4, 
+                    #     'massCorrXqq': 5, 'massCorrXpbc': 6, 'massCorrXmbc': 7,
+                    #     'massCorrXbs': 8, 'massCorrXpcs': 9, 'massCorrXmcs': 10,
+                    #     'massCorrXpud': 11, 'massCorrXmud': 12, 'massCorrXgg': 13,
+                    #     'massCorrXee': 14, 'massCorrXmm': 15, 'massCorrXtauhtaue': 16,
+                    #     'massCorrXtauhtaum': 17, 'massCorrXtauhtauh': 18,
+                    #     'massCorrQCDbb': 19, 'massCorrQCDcc': 20, 
+                    #     'massCorrQCDb': 21, 'massCorrQCDc': 22, 'massCorrQCDothers': 23
+                    # }
                     mass_corr_indices = {
-                        'massCorrResonance': 0, 'massCorrGeneric': 1, 
-                        'massCorrXbb': 2, 'massCorrXcc': 3, 'massCorrXss': 4, 
-                        'massCorrXqq': 5, 'massCorrXpbc': 6, 'massCorrXmbc': 7,
-                        'massCorrXbs': 8, 'massCorrXpcs': 9, 'massCorrXmcs': 10,
-                        'massCorrXpud': 11, 'massCorrXmud': 12, 'massCorrXgg': 13,
-                        'massCorrXee': 14, 'massCorrXmm': 15, 'massCorrXtauhtaue': 16,
-                        'massCorrXtauhtaum': 17, 'massCorrXtauhtauh': 18,
-                        'massCorrQCDbb': 19, 'massCorrQCDcc': 20, 
-                        'massCorrQCDb': 21, 'massCorrQCDc': 22, 'massCorrQCDothers': 23
+                        'massCorrResonance': 0, 'massCorrGeneric': 1,
+                        'massCorrUpsilon': 2, 'massCorrQCD': 3,
                     }
 
                     # 1. 计算X2p的权重
-                    prob_Xsum = (
-                        output_cls[:, [prob_indices['probXbb']]] +
-                        output_cls[:, [prob_indices['probXcc']]] +
-                        output_cls[:, [prob_indices['probXss']]] +
-                        output_cls[:, [prob_indices['probXqq']]] +
-                        output_cls[:, [prob_indices['probXpcs']]] +
-                        output_cls[:, [prob_indices['probXmcs']]] +
-                        output_cls[:, [prob_indices['probXpud']]] +
-                        output_cls[:, [prob_indices['probXmud']]]
-                    )
+                    # prob_Xsum = (
+                    #     output_cls[:, [prob_indices['probXbb']]] +
+                    #     output_cls[:, [prob_indices['probXcc']]] +
+                    #     output_cls[:, [prob_indices['probXss']]] +
+                    #     output_cls[:, [prob_indices['probXqq']]] +
+                    #     output_cls[:, [prob_indices['probXpcs']]] +
+                    #     output_cls[:, [prob_indices['probXmcs']]] +
+                    #     output_cls[:, [prob_indices['probXpud']]] +
+                    #     output_cls[:, [prob_indices['probXmud']]]
+                    # )
 
-                    prob_Wsum = (
-                        output_cls[:, [prob_indices['probXpcs']]] +
-                        output_cls[:, [prob_indices['probXmcs']]] +
-                        output_cls[:, [prob_indices['probXpud']]] +
-                        output_cls[:, [prob_indices['probXmud']]]
-                    )
+                    # prob_Wsum = (
+                    #     output_cls[:, [prob_indices['probXpcs']]] +
+                    #     output_cls[:, [prob_indices['probXmcs']]] +
+                    #     output_cls[:, [prob_indices['probXpud']]] +
+                    #     output_cls[:, [prob_indices['probXmud']]]
+                    # )
 
                     # 2. 加权平均计算
-                    numerator = (
-                        output_rest[:, [mass_corr_indices['massCorrXbb']]] * output_cls[:, [prob_indices['probXbb']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXcc']]] * output_cls[:, [prob_indices['probXcc']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXss']]] * output_cls[:, [prob_indices['probXss']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXqq']]] * output_cls[:, [prob_indices['probXqq']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXpcs']]] * output_cls[:, [prob_indices['probXpcs']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXmcs']]] * output_cls[:, [prob_indices['probXmcs']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXpud']]] * output_cls[:, [prob_indices['probXpud']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXmud']]] * output_cls[:, [prob_indices['probXmud']]]
-                    )
+                    # numerator = (
+                    #     output_rest[:, [mass_corr_indices['massCorrXbb']]] * output_cls[:, [prob_indices['probXbb']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXcc']]] * output_cls[:, [prob_indices['probXcc']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXss']]] * output_cls[:, [prob_indices['probXss']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXqq']]] * output_cls[:, [prob_indices['probXqq']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXpcs']]] * output_cls[:, [prob_indices['probXpcs']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXmcs']]] * output_cls[:, [prob_indices['probXmcs']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXpud']]] * output_cls[:, [prob_indices['probXpud']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXmud']]] * output_cls[:, [prob_indices['probXmud']]]
+                    # )
 
-                    numeratorW = (
-                        output_rest[:, [mass_corr_indices['massCorrXpcs']]] * output_cls[:, [prob_indices['probXpcs']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXmcs']]] * output_cls[:, [prob_indices['probXmcs']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXpud']]] * output_cls[:, [prob_indices['probXpud']]] +
-                        output_rest[:, [mass_corr_indices['massCorrXmud']]] * output_cls[:, [prob_indices['probXmud']]]
-                    )
+                    # numeratorW = (
+                    #     output_rest[:, [mass_corr_indices['massCorrXpcs']]] * output_cls[:, [prob_indices['probXpcs']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXmcs']]] * output_cls[:, [prob_indices['probXmcs']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXpud']]] * output_cls[:, [prob_indices['probXpud']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrXmud']]] * output_cls[:, [prob_indices['probXmud']]]
+                    # )
 
-                    massCorr_X2p = torch.where(
-                        prob_Xsum > 0,
-                        output_rest[:, [mass_corr_indices['massCorrGeneric']]] + numerator / prob_Xsum,
-                        output_rest[:, [mass_corr_indices['massCorrGeneric']]]
-                    )
+                    # massCorr_X2p = torch.where(
+                    #     prob_Xsum > 0,
+                    #     output_rest[:, [mass_corr_indices['massCorrGeneric']]] + numerator / prob_Xsum,
+                    #     output_rest[:, [mass_corr_indices['massCorrGeneric']]]
+                    # )
 
-                    massCorr_W2p = torch.where(
-                        prob_Wsum > 0,
-                        output_rest[:, [mass_corr_indices['massCorrGeneric']]] + numeratorW / prob_Wsum,
-                        output_rest[:, [mass_corr_indices['massCorrGeneric']]]
-                    )
+                    # massCorr_W2p = torch.where(
+                    #     prob_Wsum > 0,
+                    #     output_rest[:, [mass_corr_indices['massCorrGeneric']]] + numeratorW / prob_Wsum,
+                    #     output_rest[:, [mass_corr_indices['massCorrGeneric']]]
+                    # )
+    
+                    # massCorr_Upsilon = (
+                    #     output_rest[:, [mass_corr_indices['massCorrGeneric']]] +
+                    #     output_rest[:, [mass_corr_indices['massCorrUpsilon']]]
+                    # )
 
                     # 3. 选择需要的mass校正特征
+                    # selected_mass_corr = torch.cat([
+                    #     output_rest[:, [mass_corr_indices['massCorrGeneric']]],
+                    #     massCorr_X2p,
+                    #     massCorr_W2p,
+                    #     output_rest[:, [mass_corr_indices['massCorrResonance']]]
+                    # ], dim=1)  # 4个特征
+                    # selected_mass_corr = torch.cat([
+                    #     output_rest[:, [mass_corr_indices['massCorrGeneric']]],
+                    #     output_rest[:, [mass_corr_indices['massCorrUpsilon']]],
+                    #     output_rest[:, [mass_corr_indices['massCorrResonance']]]
+                    # ], dim=1)
                     selected_mass_corr = torch.cat([
-                        output_rest[:, [mass_corr_indices['massCorrGeneric']]],
-                        massCorr_X2p,
-                        massCorr_W2p,
                         output_rest[:, [mass_corr_indices['massCorrResonance']]]
-                    ], dim=1)  # 4个特征
+                    ])
                     
                     # ===== 最终输出合并 =====
-                    output = torch.cat([new_probs, selected_mass_corr], dim=1)  # 15 + 4 = 19个特征
+                    # output = torch.cat([new_probs, selected_mass_corr], dim=1)  # 15 + 4 = 19个特征
+                    output = torch.cat([probs, selected_mass_corr], dim=1)
                     
                 if self.export_params.get('concat_hid', False):
                     output = torch.cat([output, x_cls], dim=-1)

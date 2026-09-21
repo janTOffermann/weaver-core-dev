@@ -287,7 +287,7 @@ def evaluate_onnx(model_path, test_loader, eval_metrics=['roc_auc_score', 'roc_a
             score = sess.run([], inputs)[0]
             preds = score.argmax(1)
 
-            scores.append(score)
+            scores.append(score.float())
             for k, v in y.items():
                 labels[k].append(v.cpu().numpy())
             for k, v in Z.items():
@@ -962,3 +962,211 @@ class TensorboardHelper(object):
     def write_scalars(self, write_info):
         for tag, scalar_value, global_step in write_info:
             self.writer.add_scalar(tag, scalar_value, global_step)
+
+def write_mass_reg_plots(tb_helper, tb_mode, epoch, pred, true, cls, target_names,
+                         groups=None, n_bins=20):
+    import matplotlib
+    matplotlib.use('Agg')  # safe on headless machines / batch nodes
+    import matplotlib.pyplot as plt
+
+    if groups is None:
+        groups = {'all': None}
+
+    ep_txt = '' if epoch is None else ', epoch %d' % epoch
+
+    n_targets = min(true.shape[1], pred.shape[1])  # see caveat below
+    for j in range(n_targets):
+        tname = target_names[j]
+        for gname, inds in groups.items():
+            sel = np.ones(len(cls), dtype=bool) if inds is None else np.isin(cls, inds)
+            sel &= np.isfinite(true[:, j]) & np.isfinite(pred[:, j]) & (true[:, j] > 0)
+            if sel.sum() < 50:
+                continue
+            p, t = pred[sel, j], true[sel, j]
+            resp = p / t  # use (p - t) instead if the target is in log space
+
+            q16, q50, q84 = np.percentile(resp, [16, 50, 84])
+
+            # ---- scalars: track these across epochs in the Scalars tab ----
+            base = 'MassReg/%s/%s' % (tname, gname)
+            tb_helper.write_scalars([
+                ('%s/resp_median (%s)' % (base, tb_mode), q50, epoch),
+                ('%s/resp_resolution (%s)' % (base, tb_mode), 0.5 * (q84 - q16) / max(q50, 1e-10), epoch),
+                ('%s/resp_mean (%s)' % (base, tb_mode), resp.mean(), epoch),
+            ])
+
+            # ---- figure: 3 panels ----
+            fig, axs = plt.subplots(1, 3, figsize=(15, 4.5))
+
+            # (a) pred vs. true, 2D histogram
+            lo, hi = np.percentile(t, [0.5, 99.5])
+            axs[0].hist2d(t, p, bins=50, range=[[lo, hi], [lo, hi]], cmap='viridis', cmin=1)
+            axs[0].plot([lo, hi], [lo, hi], 'r--', lw=1)
+            axs[0].set_xlabel('True %s' % tname); axs[0].set_ylabel('Predicted %s' % tname)
+            axs[0].set_title('%s (%s)' % (gname, ep_txt))
+
+            # (b) response distribution
+            axs[1].hist(resp, bins=60, range=(0, 2), histtype='stepfilled', alpha=0.6)
+            axs[1].axvline(1, color='r', ls='--', lw=1)
+            axs[1].set_xlabel('Pred / True'); axs[1].set_ylabel('Entries')
+            axs[1].set_title('median=%.3f  res=%.3f' % (q50, 0.5 * (q84 - q16) / max(q50, 1e-10)))
+
+            # (c) response profile vs. true value (median and 16-84% band)
+            edges = np.linspace(lo, hi, n_bins + 1)
+            centers = 0.5 * (edges[1:] + edges[:-1])
+            idx = np.digitize(t, edges) - 1
+            med, lo_b, hi_b = (np.full(n_bins, np.nan) for _ in range(3))
+            for b in range(n_bins):
+                m = idx == b
+                if m.sum() >= 10:
+                    lo_b[b], med[b], hi_b[b] = np.percentile(resp[m], [16, 50, 84])
+            axs[2].plot(centers, med, 'o-')
+            axs[2].fill_between(centers, lo_b, hi_b, alpha=0.3)
+            axs[2].axhline(1, color='r', ls='--', lw=1)
+            axs[2].set_xlabel('True %s' % tname); axs[2].set_ylabel('Pred / True')
+            axs[2].set_ylim(0, 2)
+
+            fig.tight_layout()
+            tb_helper.writer.add_figure('%s/diagnostics (%s)' % (base, tb_mode), fig, epoch)
+            # add_figure closes the figure by default, so no plt.close needed
+
+def write_mass_reg_vs_pt_plots(tb_helper, tb_mode, epoch, pred, true, cls, pt, jet_mass, target_names,
+                               groups=None, pt_edges=None, min_per_bin=20):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    if groups is None:
+        groups = {'all': None}
+    if pt_edges is None:
+        # adjust to your sample; keep these FIXED so scalar tags are comparable across epochs
+        pt_edges = np.array([25, 50, 100, 150, 200, 250], dtype=float)
+    n_bins = len(pt_edges) - 1
+    centers = np.sqrt(pt_edges[1:] * pt_edges[:-1])  # geometric centers for a log x-axis
+    ep_txt = '' if epoch is None else ', epoch %d' % epoch
+
+    for j in range(min(true.shape[1], pred.shape[1])):
+        tname = target_names[j]
+        for gname, inds in groups.items():
+            sel = np.ones(len(cls), dtype=bool) if inds is None else np.isin(cls, inds)
+            sel &= np.isfinite(true[:, j]) & np.isfinite(pred[:, j]) & np.isfinite(pt) & (true[:, j] > 0)
+            if sel.sum() < 50:
+                continue
+            p, t, pt_s, mass_s = pred[sel, j], true[sel, j], pt[sel], jet_mass[sel]
+            resp = p / t  # use (p - t) if the target is in log space
+            true_mass = t * mass_s
+            pred_mass = p * mass_s
+
+            # ---- per-pT-bin statistics ----
+            idx = np.digitize(pt_s, pt_edges) - 1
+            med, lo_b, hi_b, res = (np.full(n_bins, np.nan) for _ in range(4))
+            for b in range(n_bins):
+                m = idx == b
+                if m.sum() >= min_per_bin:
+                    lo_b[b], med[b], hi_b[b] = np.percentile(resp[m], [16, 50, 84])
+                    res[b] = 0.5 * (hi_b[b] - lo_b[b]) / max(med[b], 1e-10)
+
+            # ---- scalars: one curve per pT bin, tracked across epochs ----
+            base = 'MassRegVsPt/%s/%s' % (tname, gname)
+            scalars = []
+            for b in range(n_bins):
+                if np.isfinite(med[b]):
+                    bin_tag = 'pt%d-%d' % (pt_edges[b], pt_edges[b + 1])
+                    scalars.append(('%s/%s/resp_median (%s)' % (base, bin_tag, tb_mode), med[b], epoch))
+                    scalars.append(('%s/%s/resp_resolution (%s)' % (base, bin_tag, tb_mode), res[b], epoch))
+            tb_helper.write_scalars(scalars)
+
+            # ---- figure ----
+            fig, axs = plt.subplots(1, 3, figsize=(15, 4.5))
+
+            # (a) response vs. pT, 2D histogram
+            axs[0].hist2d(pt_s, resp, bins=[np.linspace(0, 300, 50), np.linspace(0, 2, 41)], cmap='viridis', cmin=1)
+            axs[0].axhline(1, color='r', ls='--', lw=1)
+            axs[0].set_xlabel('pT'); axs[0].set_ylabel('Pred / True')
+            axs[0].set_title('%s (%s)' % (gname, ep_txt))
+
+            # (b) median response vs. pT with 16-84% band
+            axs[1].plot(centers, med, 'o-')
+            axs[1].fill_between(centers, lo_b, hi_b, alpha=0.3)
+            axs[1].axhline(1, color='r', ls='--', lw=1)
+            axs[1].set_xlabel('pT'); axs[1].set_ylabel('Pred / True'); axs[1].set_ylim(0, 2)
+
+            # (c) resolution vs. pT
+            axs[2].plot(centers, res, 'o-')
+            axs[2].set_xlabel('pT'); axs[2].set_ylabel('Resolution (half 16-84 / median)')
+            axs[2].set_ylim(bottom=0)
+
+            fig.tight_layout()
+            tb_helper.writer.add_figure('%s/diagnostics (%s)' % (base, tb_mode), fig, epoch)
+
+
+def write_pred_mass_vs_pt_plots(tb_helper, tb_mode, epoch, pred_factor, true_factor, pt, jet_mass, cls,
+                                groups=None, pt_edges=None, mass_bins=None,
+                                fixed_mass=10., mass_points=(5., 12., 20.), mass_tol=0.5,
+                                pt_range=None, min_per_bin=50):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    if groups is None:
+        groups = {'all': None}
+    if pt_edges is None:
+        pt_edges = np.array([25, 50, 100, 150, 200, 250], dtype=float)
+    if mass_bins is None:
+        mass_bins = np.linspace(0, 30, 60)   # FIXED so epochs are comparable
+    n_pt = len(pt_edges) - 1
+    pred_mass = pred_factor * jet_mass
+    true_mass = true_factor * jet_mass
+    valid = np.isfinite(pred_mass) & np.isfinite(true_mass) & np.isfinite(pt)
+
+    pt_colors = plt.cm.tab10(np.arange(n_pt))
+    mp_colors = plt.cm.tab10(np.arange(len(mass_points)) % 10)
+
+    ep_txt = '' if epoch is None else ', epoch %d' % epoch
+
+    for gname, inds in groups.items():
+        in_group = valid.copy()
+        if inds is not None:
+            in_group &= np.isin(cls, inds)
+        base = 'PredMass/%s' % gname
+
+        # ---- plot 1: fixed mass point, predicted mass in pT bins ----
+        sel = in_group & (np.abs(true_mass - fixed_mass) < mass_tol)
+        if sel.sum() >= min_per_bin:
+            pm, pt_s = pred_mass[sel], pt[sel]
+            idx = np.digitize(pt_s, pt_edges) - 1
+            fig, ax = plt.subplots(figsize=(6.5, 4.5))
+            for b in range(n_pt):
+                m = idx == b
+                if m.sum() < min_per_bin:
+                    continue
+                ax.hist(pm[m], bins=mass_bins, density=True, histtype='step', lw=1.6, color=pt_colors[b],
+                        label='pT %d-%d (n=%d, med=%.1f)' % (pt_edges[b], pt_edges[b + 1], m.sum(), np.median(pm[m])))
+            ax.axvline(fixed_mass, color='r', ls='--', lw=1, label='True mass')
+            ax.set_xlabel('Predicted jet mass'); ax.set_ylabel('Density')
+            ax.set_title('%s: true mass = %g GeV (%s%s)' % (gname, fixed_mass, tb_mode, ep_txt), fontsize=10)
+            ax.legend(fontsize=8)
+            fig.tight_layout()
+            tb_helper.writer.add_figure('%s/m%g_by_pt (%s)' % (base, fixed_mass, tb_mode), fig, epoch)
+
+        # ---- plot 2: several mass points, predicted mass distributions ----
+        in_pt = in_group.copy()
+        if pt_range is not None:
+            in_pt &= (pt >= pt_range[0]) & (pt < pt_range[1])
+        entries = []
+        for k, m0 in enumerate(mass_points):
+            s = in_pt & (np.abs(true_mass - m0) < mass_tol)
+            if s.sum() >= min_per_bin:
+                entries.append((k, m0, pred_mass[s]))
+        if entries:
+            fig, ax = plt.subplots(figsize=(6.5, 4.5))
+            for k, m0, v in entries:
+                ax.hist(v, bins=mass_bins, density=True, histtype='step', lw=1.6, color=mp_colors[k],
+                        label='m = %g (n=%d, med=%.1f)' % (m0, len(v), np.median(v)))
+                ax.axvline(m0, color=mp_colors[k], ls='--', lw=1)
+            ax.set_xlabel('Predicted jet mass'); ax.set_ylabel('Density')
+            pt_txt = '' if pt_range is None else ', pT %g-%g' % tuple(pt_range)
+            ax.set_title('%s: by true mass%s (%s%s)' % (gname, pt_txt, tb_mode, ep_txt), fontsize=10)
+            ax.legend(fontsize=8)
+            fig.tight_layout()
+            tb_helper.writer.add_figure('%s/by_mass_point (%s)' % (base, tb_mode), fig, epoch)

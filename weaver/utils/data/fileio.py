@@ -335,9 +335,20 @@ def _read_files(filelist, branches, load_ranges=None, show_progressbar=False, **
             _logger.error(traceback.format_exc())
         if a is not None:
             table.append(a)
+    if len(table) == 0:
+        # every file in this chunk failed to load — return a properly-shaped
+        # empty ak.Array (with the right fields) instead of a bare list
+        _logger.warning(
+            f'No files could be successfully read from {filelist}. Skipping (empty chunk).'
+        )
+        return ak.Array({k: [] for k in branches})
+
     table = _concat(table)  # ak.Array
     if len(table) == 0:
-        raise RuntimeError(f'Zero entries loaded when reading files {filelist} with `load_ranges`={load_ranges}.')
+        _logger.warning(
+            f'Zero entries loaded when reading files {filelist} with `load_ranges`={load_ranges}. Skipping.'
+        )
+        # raise RuntimeError(f'Zero entries loaded when reading files {filelist} with `load_ranges`={load_ranges}.')
     return table
 
 

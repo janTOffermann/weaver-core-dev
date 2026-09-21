@@ -15,6 +15,9 @@ from utils.nn.tools import (
     train_regression,
     evaluate_regression,
     evaluate_metrics,
+    write_mass_reg_plots,
+    write_mass_reg_vs_pt_plots,
+    write_pred_mass_vs_pt_plots,
     _flatten_preds,
     _flatten_label,
     _concat
@@ -83,6 +86,8 @@ def get_model(data_config, **kwargs):
     model.num_nodes = num_nodes
     model.num_cls_nodes = num_cls_nodes
     model.eval_kw = eval_kw
+    model.num_unifd = len(reg_kw.get('composed_split_reg', []))
+    model.as_resid_of = reg_kw.get('as_resid_of', None)
 
     _logger.info('Model config: %s' % str(cfg))
 
@@ -170,15 +175,9 @@ class ComposedHybridLoss(torch.nn.Module):
         loss_cls = self.loss_cls_fn(input_cls, target_cls)
 
         # regression inputs
-        input_reg_unifd = input_reg[:, :self.num_unifd]
-        input_reg_split = input_reg[:, self.num_unifd:]
+        input_reg_unifd = valid_input_reg[:, :self.num_unifd]
+        input_reg_split = valid_input_reg[:, self.num_unifd:]
 
-        # print("input_reg shape:", input_reg.shape)
-        # print("input_reg_unifd shape:", input_reg_unifd.shape)
-        # print("input_reg_split shape:", input_reg_split.shape)
-        # print("num_unifd:", self.num_unifd)
-        # print("split:", self.split)    
-    
         # compute unified regression loss
         n_target_reg = target_reg.shape[1]
         loss_reg_unifd = self.loss_reg_unifd_fn(input_reg_unifd, target_reg[:, self.unifd])
@@ -310,11 +309,22 @@ def train_hybrid(model, loss_func, opt, scheduler, train_loader, dev, epoch, ste
 
             # for regression
             if len(data_config.label_names) > 1:
-                label_reg = [y[n].float().to(dev).unsqueeze(1) for n in data_config.label_names[1:]] # can support multiple regression target
+                # label_reg = [y[n].float().to(dev).unsqueeze(1) for n in data_config.label_names[1:]] # can support multiple regression target
+                reg_label_names = [n for n in data_config.label_names[1:]]
+                label_reg = [y[n].float().to(dev).unsqueeze(1) for n in reg_label_names]
                 label_reg = torch.cat(label_reg, dim=1)
             else:
                 label_reg = None
             n_reg_target = len(data_config.label_names) - 1
+            # if 'reg_mask' in data_config.label_names:
+            #     n_reg_target = len(data_config.label_names) - 2
+            # else:
+            #     n_reg_target = len(data_config.label_names) - 1
+
+            # if 'reg_mask' in data_config.label_names:
+            #     reg_mask = y['reg_mask'].float().to(dev)  # shape: (B,)
+            # else:
+            #     reg_mask = torch.ones(label_cls.shape[0], device=dev)
 
             opt.zero_grad()
             # with torch.autograd.detect_anomaly():
@@ -322,6 +332,25 @@ def train_hybrid(model, loss_func, opt, scheduler, train_loader, dev, epoch, ste
                 model_output = model(*inputs)
                 logits = model_output[:, :n_cls]
                 preds_reg = model_output[:, n_cls:]
+                # preds_reg = torch.nn.functional.softplus(model_output[:, n_cls:])
+                # raw_reg = model_output[:, n_cls:].float()
+
+                # base_model = model.module if hasattr(model, 'module') else model
+
+                # num_unifd = getattr(base_model, 'num_unifd', raw_reg.shape[1])
+                # as_resid_of = getattr(base_model, 'as_resid_of', None)
+
+                # if raw_reg.shape[1] > num_unifd:
+                #     reg_unifd = torch.nn.functional.softplus(raw_reg[:, :num_unifd])
+                #     reg_split_raw = raw_reg[:, num_unifd:]
+                #     if as_resid_of is not None:
+                #         reg_split_raw = reg_split_raw + reg_unifd[:, as_resid_of]
+                #     reg_split = torch.nn.functional.softplus(reg_split_raw)
+                #     preds_reg = torch.cat([reg_unifd, reg_split], dim=1)
+                # elif raw_reg.shape[1] > 0:
+                #     preds_reg = torch.nn.functional.softplus(raw_reg)
+                # else:
+                #     preds_reg = raw_reg
                 loss, loss_monitor = loss_func(logits, preds_reg, label_cls, label_reg)
             if grad_scaler is None:
                 loss.backward()
@@ -472,6 +501,10 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
     label_cls_array = []
     eval_kw = model.module.eval_kw \
         if isinstance(model, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else model.eval_kw
+    collect_reg_plots = (tb_helper is not None) and for_training and len(data_config.label_names) > 1
+    pt_obs_name = 'scoutfj_gen_pt'
+    jet_mass_obs_name = 'scoutfj_mass'
+    reg_pred_list, reg_true_list, cls_true_list, pt_list, jet_mass_list = [], [], [], [], []
     with torch.no_grad():
         with tqdm.tqdm(test_loader) as tq:
             for X, y, Z in tq:
@@ -486,7 +519,9 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
 
                 # for regression
                 if len(data_config.label_names) > 1:
-                    label_reg = [y[n].float().to(dev).unsqueeze(1) for n in data_config.label_names[1:]]
+                    # label_reg = [y[n].float().to(dev).unsqueeze(1) for n in data_config.label_names[1:]]
+                    reg_label_names = [n for n in data_config.label_names[1:]]
+                    label_reg = [y[n].float().to(dev).unsqueeze(1) for n in reg_label_names]
                     label_reg = torch.cat(label_reg, dim=1)
                 else:
                     label_reg = None
@@ -502,9 +537,18 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
                 logits = model_output[:, :n_cls].float()
                 preds_reg = model_output[:, n_cls:].float()
 
+                if collect_reg_plots:
+                    reg_pred_list.append(preds_reg.detach().cpu().numpy())
+                    reg_true_list.append(label_reg.detach().cpu().numpy())
+                    cls_true_list.append(label_cls.detach().cpu().numpy())
+                    if pt_obs_name in Z:
+                        pt_list.append(Z[pt_obs_name].cpu().numpy().reshape(-1))
+                    if jet_mass_obs_name in Z:
+                        jet_mass_list.append(Z[jet_mass_obs_name].cpu().numpy().reshape(-1))
+
                 if not for_training:
                     scores_cls.append(torch.softmax(logits, dim=1).detach().cpu().numpy())
-                    scores_reg.append(preds_reg.detach().cpu().numpy())
+                    scores_reg.append(preds_reg.detach().float().cpu().numpy())
                     for k, v in y.items():
                         labels[k].append(v.cpu().numpy())
                 if not for_training:
@@ -583,6 +627,42 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
             # ("MSE/%s (epoch)" % tb_mode, sum_sqr_err / count, epoch),
             # ("MAE/%s (epoch)" % tb_mode, sum_abs_err / count, epoch),
             ])
+        if collect_reg_plots and len(reg_pred_list) > 0:
+            roc_kw = eval_kw.get('roc_kw', None)
+            groups = {
+                'Upsilon3g': [0],
+                'UpsilonTauHTauH': [1],
+            #     'QCD': [2],
+            }
+            write_mass_reg_plots(
+                tb_helper, tb_mode, epoch,
+                pred=np.concatenate(reg_pred_list),
+                true=np.concatenate(reg_true_list),
+                cls=np.concatenate(cls_true_list),
+                target_names=data_config.label_names[1:],
+                groups=groups,
+            )
+        if collect_reg_plots and len(pt_list) == len(reg_pred_list) and len(pt_list) > 0:
+            write_mass_reg_vs_pt_plots(
+                tb_helper, tb_mode, epoch,
+                pred=np.concatenate(reg_pred_list),
+                true=np.concatenate(reg_true_list),
+                cls=np.concatenate(cls_true_list),
+                pt=np.concatenate(pt_list),
+                jet_mass=np.concatenate(jet_mass_list),
+                target_names=data_config.label_names[1:],
+                groups=groups,
+            )
+        if collect_reg_plots and len(pt_list) == len(reg_pred_list) == len(jet_mass_list) > 0:
+            write_pred_mass_vs_pt_plots(
+                tb_helper, tb_mode, epoch,
+                pred_factor=np.concatenate(reg_pred_list)[:, 0],
+                true_factor=np.concatenate(reg_true_list)[:, 0],
+                pt=np.concatenate(pt_list),
+                jet_mass=np.concatenate(jet_mass_list),
+                cls=np.concatenate(cls_true_list),
+                groups=groups,
+            )
         if 'reg_split' in loss_monitor:
             tb_helper.write_scalars([
                 ("LossRegSplit/%s (epoch)" % tb_mode, total_loss_reg_split / count, epoch),
@@ -675,7 +755,7 @@ def save_hybrid(args, data_config, scores, labels, observers):
             "label_H_WxWx_cscs", "label_H_WxWx_csqq", "label_H_WxWx_qqqq", "label_H_WxWx_csc", "label_H_WxWx_css", "label_H_WxWx_csq", "label_H_WxWx_qqc", "label_H_WxWx_qqs", "label_H_WxWx_qqq", "label_H_WxWx_csev", "label_H_WxWx_qqev", "label_H_WxWx_csmv", "label_H_WxWx_qqmv", "label_H_WxWx_cstauev", "label_H_WxWx_qqtauev", "label_H_WxWx_cstaumv", "label_H_WxWx_qqtaumv", "label_H_WxWx_cstauhv", "label_H_WxWx_qqtauhv", 
             "label_H_WxWxStar_cscs", "label_H_WxWxStar_csqq", "label_H_WxWxStar_qqqq", "label_H_WxWxStar_csc", "label_H_WxWxStar_css", "label_H_WxWxStar_csq", "label_H_WxWxStar_qqc", "label_H_WxWxStar_qqs", "label_H_WxWxStar_qqq", "label_H_WxWxStar_csev", "label_H_WxWxStar_qqev", "label_H_WxWxStar_csmv", "label_H_WxWxStar_qqmv", "label_H_WxWxStar_cstauev", "label_H_WxWxStar_qqtauev", "label_H_WxWxStar_cstaumv", "label_H_WxWxStar_qqtaumv", "label_H_WxWxStar_cstauhv", "label_H_WxWxStar_qqtauhv", 
             "label_QCD_bb", "label_QCD_cc", "label_QCD_b", "label_QCD_c", "label_QCD_others",
-            "label_Upsilon_ggg", "label_QCD",
+            "label_Upsilon_ggg", "label_Upsilon_tauhtauh", "label_QCD",
             ]
 
     output = {}
@@ -689,6 +769,7 @@ def save_hybrid(args, data_config, scores, labels, observers):
             # write unified regression nodes
             for idx in range(1, len(data_config.label_names)):
                 name = data_config.label_names[idx]
+                if name == 'reg_mask': continue
                 # do unified regression (always true for this script)
                 print('write unified regression nodes:', name)
                 output[name] = labels[name]
@@ -697,6 +778,7 @@ def save_hybrid(args, data_config, scores, labels, observers):
             # write split regression nodes
             for idx in range(1, len(data_config.label_names)):
                 name = data_config.label_names[idx]
+                if name == 'reg_mask': continue
                 if composed_split_reg[idx-1]: # do split regression
                     print('write split regression nodes:', name)
                     if name not in output:
@@ -711,6 +793,7 @@ def save_hybrid(args, data_config, scores, labels, observers):
             # write split regression nodes
             for idx in range(1, len(data_config.label_names)):
                 name = data_config.label_names[idx]
+                if name == 'reg_mask': continue
                 output[name] = labels[name]
                 for idx_cls, label_name in enumerate(label_cls_nodes):
                     if label_name not in label_stored:
@@ -720,6 +803,7 @@ def save_hybrid(args, data_config, scores, labels, observers):
             # write normal (unified) regression nodes
             for idx in range(1, len(data_config.label_names)):
                 name = data_config.label_names[idx]
+                if name == 'reg_mask': continue
                 output[name] = labels[name]
                 output['output_' + name] = scores_reg[:, idx-1]
 
@@ -731,7 +815,7 @@ def save_hybrid(args, data_config, scores, labels, observers):
         output['score_' + label_name] = scores_cls[:, idx]
 
     for k, v in labels.items():
-        if k == data_config.label_names[0]:
+        if k == data_config.label_names[0] or k == 'reg_mask':
             continue
         assert v.ndim == 1
         output[k] = v

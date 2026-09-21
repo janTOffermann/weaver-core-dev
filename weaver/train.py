@@ -41,7 +41,7 @@ parser.add_argument('--extra-selection-test', type=str, default=None,
                     help='Additional test-time selection requirement, will modify `test_time_selection` to `(test_time_selection) & (extra)` on-the-fly')
 parser.add_argument('--seed', type=int, default=-1,
                     help='Set seed for all torch, numpy utilities for reproducibility')
-parser.add_argument('-c', '--data-config', type=str, default='data/ak15_points_pf_sv_v0.yaml',
+parser.add_argument('-c', '--data-config', type=str, required=True,
                     help='data config YAML file')
 parser.add_argument('-i', '--data-train', nargs='*', default=[],
                     help='training files; supported syntax:'
@@ -272,7 +272,8 @@ def train_load(args):
                                  fetch_step=args.fetch_step,
                                  infinity_mode=args.steps_per_epoch_val is not None,
                                  in_memory=args.in_memory,
-                                 name='val' + ('' if args.local_rank is None else '_rank%d' % args.local_rank))
+                                 name='val' + ('' if args.local_rank is None else '_rank%d' % args.local_rank),
+                                 load_observers=True)
     actual_workers = min(args.num_workers, int(len(train_files) * args.file_fraction))
     train_loader = DataLoader(train_data, batch_size=args.batch_size, drop_last=True, pin_memory=True,
                               num_workers=actual_workers,

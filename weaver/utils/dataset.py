@@ -83,9 +83,12 @@ def _check_labels(table):
 
 def _preprocess(table, data_config, options):
     # apply selection
+    if len(table) == 0:
+        return table, np.array([], dtype=np.int64)
+
     table = _apply_selection(table, data_config.selection if options['training'] else data_config.test_time_selection)
     if len(table) == 0:
-        return []
+        return table, np.array([], dtype=np.int64)
     _logger.info(f"==> Post-cut chunk size: {len(table)} events passed the selection.")
     # define new variables
     table = _build_new_variables(table, data_config.var_funcs)
@@ -337,7 +340,7 @@ class SimpleIterDataset(torch.utils.data.IterableDataset):
 
     def __init__(self, file_dict, data_config_file, for_training=True, load_range_and_fraction=None, extra_selection=None,
                  fetch_by_files=False, fetch_step=0.01, file_fraction=1, start_pos=None, remake_weights=False, up_sample=True,
-                 weight_scale=1, max_resample=10, async_load=True, infinity_mode=False, in_memory=False, name=''):
+                 weight_scale=1, max_resample=10, async_load=True, infinity_mode=False, in_memory=False, name='', load_observers=None):
         self._iters = {} if infinity_mode or in_memory else None
         _init_args = set(self.__dict__.keys())
         self._init_file_dict = file_dict
@@ -392,7 +395,10 @@ class SimpleIterDataset(torch.utils.data.IterableDataset):
                 _logger.info(
                     'Found file %s w/ auto-generated preprocessing information, will use that instead!' %
                     data_config_file)
-            self._data_config = DataConfig.load(data_config_file, load_observers=False, extra_selection=extra_selection)
+            if load_observers:
+                self._data_config = DataConfig.load(data_config_file, load_observers=True, extra_selection=extra_selection)
+            else:
+                self._data_config = DataConfig.load(data_config_file, load_observers=False, extra_selection=extra_selection)
 
         # derive all variables added to self.__dict__
         self._init_args = set(self.__dict__.keys()) - _init_args

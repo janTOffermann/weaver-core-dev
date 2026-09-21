@@ -3,14 +3,21 @@
 
 # to select scouting jets, ensure that QCD scouting jets from the resonant (signal) samples are not included (they are not excluded in the samples; only reco QCD jets are excluded)
 selection: >-
-    (scoutfj_pt>25) & (scoutfj_pt<300) & (scoutfj_sdmass>0) & (scoutfj_sdmass<50) & (ak.num(scoutpfcand_px) > 0) &
+    (scoutfj_pt>25) & (scoutfj_pt<300) & (scoutfj_sdmass>0) & (scoutfj_sdmass<60) & (ak.num(scoutpfcand_px) > 0) &
     (
-      ((sample_isQCD==1) & (scoutfj_label >= 2) & (scoutfj_label <= 6) & (event_no%7!=0)) |
-      ((sample_isQCD==0) & (scoutfj_isQCD==0))
+      ((sample_isQCD==1) & (scoutfj_label >= 2) & (scoutfj_label <= 6) & (event_no%10 <= 3)) |
+      ((sample_isQCD==0) & (scoutfj_isQCD==0) & (event_no%10 <= 7))
     )
 ### selection to apply at test time (i.e., when running w/ --predict)
 test_time_selection: >-
-      (scoutfj_pt>25) & (scoutfj_pt<300) 
+    (scoutfj_pt>25) & (scoutfj_pt<300) &
+    (
+      ((sample_isQCD==1) & (event_no%10 > 8)) |
+      ((sample_isQCD==0) & (scoutfj_isQCD==0) & (event_no%10 > 6))
+    )
+
+treename:
+  Events
 
 new_variables:
     ### [format] name: formula
@@ -45,6 +52,7 @@ new_variables:
     label_H_tauhtauh: (scoutfj_label == 29)
     # label_QCD: (scoutfj_label >= 309) & (scoutfj_label < 314)
     label_Upsilon3g: (scoutfj_label == 0)
+    label_Upsilon_tauhtauh: (scoutfj_label == 1) | (scoutfj_label == 14)
     label_QCD: (scoutfj_label >= 2) & (scoutfj_label <= 6)
 
     # define "v3 for scouting" labels
@@ -70,8 +78,9 @@ new_variables:
     #     ak.where((scoutfj_label >= 25) & (scoutfj_label <= 29), scoutfj_label - 13,
     #     ak.where((scoutfj_label >= 309) & (scoutfj_label <= 313), scoutfj_label - 352, 10000)))))))))))
     fj_label_scout: >-
-        ak.where((scoutfj_label == 0) & (scoutfj_gen_pid == 553), 0,
-        ak.where((scoutfj_label >= 2) & (scoutfj_label <= 6), 17, 10000))
+        ak.where((scoutfj_label == 0), 0,
+        ak.where((scoutfj_label == 1) | (scoutfj_label == 14), 1,
+        ak.where((scoutfj_label >= 2) & (scoutfj_label <= 6), 2, 10000)))
 
 
     # charged and neutral scoutingpfcand
@@ -214,6 +223,7 @@ observers:
     #- fj_genjet_sdmass
     #- fj_genjet_nomu_sdmass
     - sample_isQCD
+    # - sample_forTraining
     #- pfParticleNetMassRegressionJetTags_mass
     #- pfMassDecorrelatedParticleNetJetTags_probXbb
     #- pfMassDecorrelatedParticleNetJetTags_probXcc
@@ -300,11 +310,12 @@ observers:
     - scoutfj_genpart1_pid
     - scoutfj_genpart2_pid
     - scoutfj_genpart3_pid
+    - scoutfj_genjet_mass
     #- scoutfj_probHbb
     #- scoutfj_probHcc
     #- scoutfj_probHqq
     #- scoutfj_probQCD
-    - scoutfj_massreg
+    # - scoutfj_massreg
 
 weights:
     ### [option 1] use precomputed weights stored in the input files
@@ -317,16 +328,20 @@ weights:
         scoutfj_pt: [200, 251, 316, 398, 501, 631, 794, 1000, 1258, 1583, 1993, 2508, 3156, 3972, 5000]
         scoutfj_sdmass: [0, 7.1, 14.5, 22.1, 29.9, 38.0, 46.3, 54.9, 63.7, 72.7, 82.0, 91.5, 101.3, 111.3, 121.5, 132.0, 142.7, 153.7, 164.9, 176.3, 188.0, 199.9, 212.1, 224.5, 237.1, 250.0, 263.1, 276.5, 290.1, 303.9, 318.0, 332.3, 346.9, 361.7, 376.7, 392.0, 407.5, 423.3, 439.3, 455.5, 472.0, 488.7, 505.7, 522.9, 540.3, 558.0, 575.9, 594.1, 612.5, 631.1, 650.0]
     reweight_classes:
+        # [
+        #   label_H_bb, label_H_cc, label_H_ss, label_H_qq, label_H_bc, label_H_bs, label_H_cs, label_H_ud, label_H_gg,
+        #   label_H_ee, label_H_mm, label_H_tauhtaue, label_H_tauhtaum, label_H_tauhtauh, 
+        #   label_QCD, 
+        # ]
         [
-          label_H_bb, label_H_cc, label_H_ss, label_H_qq, label_H_bc, label_H_bs, label_H_cs, label_H_ud, label_H_gg,
-          label_H_ee, label_H_mm, label_H_tauhtaue, label_H_tauhtaum, label_H_tauhtauh, 
-          label_QCD, 
+          label_Upsilon3g, label_Upsilon_tauhtauh, label_QCD
         ]
     class_weights:
-      [
-        0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 
-        0.06, 0.06, 0.04, 0.04, 0.12,
-        1,
-      ]
+      # [
+      #   0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 
+      #   0.06, 0.06, 0.04, 0.04, 0.12,
+      #   1,
+      # ]
+      [1, 1, 1]
     reweight_hists:
 
