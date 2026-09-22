@@ -92,6 +92,52 @@ VAL_SAMPLES=$((100 * BATCH))
 MODEL_DIR=weaver/model
 LOG_DIR=$HOME/scratch/logs
 PRED_DIR=$HOME/scratch/predict
+MASSREG_DIR=$HOME/scratch/massreg
+
+# --- regressed-mass histogram metrics (weaver/utils/nn/mass_hist.py) -----------
+#
+# Each block is a (sample, truth class) selection split into histograms along one
+# axis. `sample` is the per-file tag injected by the filepath rules in
+# weaver/utils/data/fileio.py -- nominal = SingleUpsilon*, modified =
+# Upsilon_modified_mass -- and requires `sample_kind` in the yaml's observers.
+# `cls: 0` is Y->ggg (fj_label_scout), which holds for both the 2- and 3-class
+# setups since label_cls_nodes only names outputs, it does not remap truth labels.
+# `None` as the last pT edge means open-ended; the config goes through
+# ast.literal_eval, which has no spelling for infinity.
+#
+# A block whose sample is absent from the data being evaluated simply does not
+# fill, so the same spec serves the in-training pass and mass_reg_posthoc.py.
+# Validation is split out of --data-train (smeared-mass only), so in training only
+# `smeared_by_mass` fills; `nominal_by_pt` comes from the post-hoc pass over
+# --data-test, where the SingleUpsilon samples live.
+#
+# write_plots is False because this env has no PyROOT: epochs accumulate into
+# massreg_hists.npz, rendered afterwards from the `weaver-root` env. See
+# "after training" at the bottom of this file.
+mass_hist_kw() {  # $1 = stage tag, so each stage keeps its own epoch axis
+  cat <<EOF
+{'outdir': '${MASSREG_DIR}/${PREFIX}_$1', 'tag': 'massreg', 'write_plots': False,
+ 'mass_bins': (100, 0., 50.), 'resp_bins': (120, 0., 3.),
+ 'baseline_epoch': -1, 'min_entries': 50,
+ # Which metric decides the "best" epoch. Uncomment to take best-epoch selection
+ # away from the validation loss and give it to a metric scoped to ONE block, and
+ # therefore ONE sample -- so adding other samples to --data-val cannot change it.
+ # Naming two blocks is deliberately not expressible: combining a nominal-mass and
+ # a smeared-mass number into one score is not meaningful.
+ #   metric: 'abs_median_bias' (|median(pred/true) - 1|), 'resolution', or
+ #           'ks_vs_baseline'; lower is better for all three, as train.py expects.
+ #   reduce: 'mean' or 'worst' across the block's sub-bins; add 'sub': '<name>'
+ #           to pin it to one sub-bin instead.
+ # 'selection_metric': {'block': 'smeared_by_mass', 'metric': 'abs_median_bias', 'reduce': 'mean'},
+ 'blocks': [
+   {'name': 'nominal_by_pt', 'sample': 'nominal', 'cls': 0,
+    'title': 'Nominal-mass Y#rightarrowggg',
+    'split': {'var': 'gen_pt', 'edges': [50, 100, 200, None], 'label': 'Y p_{T}'}},
+   {'name': 'smeared_by_mass', 'sample': 'modified', 'cls': 0,
+    'title': 'Smeared-mass Y#rightarrowggg',
+    'split': {'var': 'gen_mass', 'points': [6, 15, 24], 'tol': 0.5, 'label': 'Y mass'}}]}
+EOF
+}
 
 # ============================== regex reference ===============================
 #
@@ -194,6 +240,7 @@ run_stage1() {
     --optimizer-option weight_decay 1e-4 \
     --load-model-weights ${PRETRAINED} --exclude-model-weights 'part\.fc\.1' \
     --freeze-model-weights "(?!part\.fc\.).*" \
+    -o eval_kw "{'mass_hist_kw': $(mass_hist_kw stage1)}" \
     --model-prefix ${MODEL_DIR}/${PREFIX}_stage1/net \
     --log-file ${LOG_DIR}/${PREFIX}_stage1/train.log \
     --tensorboard _${PREFIX}_stage1
@@ -230,6 +277,7 @@ run_stage2() {
     --optimizer-option weight_decay 1e-4 \
     --optimizer-option lr_mult '["part\\.fc\\..*", '"${S2_HEAD_MULT}"']' \
     --load-model-weights ${MODEL_DIR}/${PREFIX}_stage1/net_best_epoch_state.pt \
+    -o eval_kw "{'mass_hist_kw': $(mass_hist_kw stage2)}" \
     --model-prefix ${MODEL_DIR}/${PREFIX}_stage2/net \
     --log-file ${LOG_DIR}/${PREFIX}_stage2/train.log \
     --tensorboard _${PREFIX}_stage2 \
@@ -267,6 +315,57 @@ echo "=== done (stage: ${STAGE}) ==="
 # Predictions land in ${PRED_DIR}/${PREFIX}_stage2/pred.root -> Run_metrics.ipynb.
 # The regression node is a RATIO: reconstruct the mass as
 #     output_target_res_mass_factor * scoutfj_mass
+#
+# --- regressed-mass histograms -------------------------------------------------
+#
+# Training fills only `smeared_by_mass` (validation is split out of --data-train).
+# To get the nominal-mass histograms and the pre-finetune reference, run the
+# post-hoc pass. Submit these via sbatch -- they run model inference, so not on
+# the login node. Steps 1-2 need the `weaver` env, step 3 needs `weaver-root`,
+# and all three must be given the SAME -o eval_kw.
+#
+# Use a mass-histogram-specific data spec rather than ${DATA_TEST[@]}: the
+# smeared-mass runs differ in how far their smearing extends, and the two runs
+# held out of TRAIN_SIG both stop at ~20 GeV --
+#
+#     v1/run1,2,8,9  max gen_mass ~25   v2/run3  max ~20.1
+#     v2/run1,2      max gen_mass ~25   v2/run4  max ~19.9
+#     v3/run1,2      max gen_mass ~22.6
+#
+# so TEST_SIG_SCAN (v2/run3) can never fill the 24 GeV sub-bin. The runs that do
+# reach 24 GeV are in TRAIN_SIG, but that is fine here: the data config holds out
+# by EVENT, not by file -- training takes event_no%10 <= 7 and test_time_selection
+# takes event_no%10 > 7 -- so pointing this pass at them still evaluates on events
+# the network never trained on. (In-training validation is an entry-range split of
+# TRAIN_SIG, which does reach 25 GeV, so the 24 GeV bin fills there already.)
+#
+#   MASSREG_TEST=(--data-test \
+#     "${DATA_DIR}/SingleUpsilon/upsilon_[123]s/Octet*/run*/${JET_COLLECTION}/job*/*.root" \
+#     "${DATA_DIR}/Upsilon_modified_mass/v1/run[1289]/${JET_COLLECTION}/job*/*.root" \
+#     "${DATA_DIR}/Upsilon_modified_mass/v2/run[12]/${JET_COLLECTION}/job*/*.root")
+#
+#   EK="{'mass_hist_kw': $(mass_hist_kw stage2)}"
+#
+#   # 1. pre-finetune reference -> epoch -1, the KS baseline. Note it loads the
+#   #    stage-1 checkpoint the way stage 2 starts from it, so "baseline" means
+#   #    "where stage 2 began", not the untouched 2024.pt.
+#   python weaver/scripts/mass_reg_posthoc.py "${COMMON[@]}" "${MASSREG_TEST[@]}" \
+#     -o eval_kw "${EK}" --baseline \
+#     --load-model-weights ${MODEL_DIR}/${PREFIX}_stage1/net_best_epoch_state.pt \
+#     --model-prefix ${MODEL_DIR}/${PREFIX}_stage2/net
+#
+#   # 2. every epoch checkpoint (omit --epochs to pick up all that exist)
+#   python weaver/scripts/mass_reg_posthoc.py "${COMMON[@]}" "${MASSREG_TEST[@]}" \
+#     -o eval_kw "${EK}" --epochs 0-$((S2_EPOCHS - 1)) \
+#     --model-prefix ${MODEL_DIR}/${PREFIX}_stage2/net
+#
+#   # 3. render to .root + .pdf (needs PyROOT, not torch, not the data)
+#   conda activate weaver-root
+#   python weaver/scripts/mass_reg_posthoc.py -o eval_kw "${EK}" --from-state
+#
+# Output lands in ${MASSREG_DIR}/${PREFIX}_stage2/: massreg.root (every TH1/TH2/
+# TGraph), one multi-page massreg_<block>.pdf per block, and massreg_hists.npz
+# (the accumulated counts -- re-runnable, and what step 3 reads).
 #
 # ONNX export (see run.sh for the full form). compress_outputs MUST be False: the
 # compression path in ParticleTransformer2024Plus_forScouting.py hard-codes the 22-class
