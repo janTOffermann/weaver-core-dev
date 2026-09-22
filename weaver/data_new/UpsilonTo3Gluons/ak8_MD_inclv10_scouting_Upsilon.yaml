@@ -6,7 +6,7 @@ selection: >-
     (scoutfj_pt>40) & (scoutfj_pt<300) & (scoutfj_sdmass>0) & (scoutfj_sdmass<60) & (ak.num(scoutpfcand_px) > 0) &
     (
       ((sample_isQCD==1) & (scoutfj_label >= 2) & (scoutfj_label <= 7) & (event_no%10 <= 1)) |
-      ((sample_isQCD==0) & (scoutfj_isQCD==0) & (scoutfj_gen_mass >= 5) & (scoutfj_gen_mass <= 20) & (event_no%10 <= 7)))
+      ((sample_isQCD==0) & (scoutfj_isQCD==0) & (scoutfj_gen_mass >= 5) & (scoutfj_gen_mass <= 25) & (event_no%10 <= 7)))
 
 # & (np.sqrt(np.power(scoutfj_gen_mass, 2) + np.power(scoutfj_gen_pt, 2))/scoutfj_energy > 0.8))
 
@@ -177,6 +177,8 @@ labels:
 observers:
     - event_no
     - sample_isQCD
+    # injected per-file by utils/data/fileio.py: 0=QCD, 1=nominal-mass Y, 2=smeared-mass Y
+    - sample_kind
     # - sample_forTraining
     # - reweight_mass
     # scouting jet features

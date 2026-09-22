@@ -502,8 +502,17 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
     eval_kw = model.module.eval_kw \
         if isinstance(model, (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel)) else model.eval_kw
     collect_reg_plots = (tb_helper is not None) and for_training and len(data_config.label_names) > 1
+    # the regressed-mass histograms are routed per sample (see utils/nn/mass_hist.py),
+    # so they need the sample tag and the generated Y mass on top of what the older
+    # plots collect; unlike those, they also run on the test pass.
+    mass_hist_kw = eval_kw.get('mass_hist_kw', None)
+    collect_mass_hist = (mass_hist_kw is not None) and len(data_config.label_names) > 1
+    collect_arrays = collect_reg_plots or collect_mass_hist
+    mass_hist_selection_metric = None  # set below if `selection_metric` is configured
     pt_obs_name = 'scoutfj_gen_pt'
     jet_mass_obs_name = 'scoutfj_mass'
+    extra_obs_names = {'sample_kind': 'sample_kind', 'gen_mass': 'scoutfj_gen_mass'}
+    extra_obs = {k: [] for k in extra_obs_names}
     reg_pred_list, reg_true_list, cls_true_list, pt_list, jet_mass_list = [], [], [], [], []
     with torch.no_grad():
         with tqdm.tqdm(test_loader) as tq:
@@ -537,7 +546,7 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
                 logits = model_output[:, :n_cls].float()
                 preds_reg = model_output[:, n_cls:].float()
 
-                if collect_reg_plots:
+                if collect_arrays:
                     reg_pred_list.append(preds_reg.detach().cpu().numpy())
                     reg_true_list.append(label_reg.detach().cpu().numpy())
                     cls_true_list.append(label_cls.detach().cpu().numpy())
@@ -545,6 +554,9 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
                         pt_list.append(Z[pt_obs_name].cpu().numpy().reshape(-1))
                     if jet_mass_obs_name in Z:
                         jet_mass_list.append(Z[jet_mass_obs_name].cpu().numpy().reshape(-1))
+                    for _k, _name in extra_obs_names.items():
+                        if _name in Z:
+                            extra_obs[_k].append(Z[_name].cpu().numpy().reshape(-1))
 
                 if not for_training:
                     scores_cls.append(torch.softmax(logits, dim=1).detach().cpu().numpy())
@@ -676,6 +688,58 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
         if tb_helper.custom_fn:
             with torch.no_grad():
                 tb_helper.custom_fn(model_output=model_output, model=model, epoch=epoch, i_batch=-1, mode=tb_mode)
+
+    # regressed-mass histograms, routed per sample by utils/nn/mass_hist.py.
+    # Deliberately outside the `if tb_helper` block: the histograms and their
+    # ROOT/PDF output stand on their own, so this also runs on the test pass.
+    if collect_mass_hist and len(reg_pred_list) > 0 and len(jet_mass_list) == len(reg_pred_list):
+        from utils.nn.mass_hist import run_mass_hist
+        jet_mass = np.concatenate(jet_mass_list)
+        pred_factor = np.concatenate(reg_pred_list)[:, 0]
+        true_factor = np.concatenate(reg_true_list)[:, 0]
+        arrays = {
+            'pred_mass': pred_factor * jet_mass,
+            'true_mass': true_factor * jet_mass,
+            'jet_mass': jet_mass,
+            'cls': np.concatenate(cls_true_list),
+        }
+        if len(pt_list) == len(reg_pred_list):
+            arrays['gen_pt'] = np.concatenate(pt_list)
+        for _k, _v in extra_obs.items():
+            if len(_v) == len(reg_pred_list):
+                arrays[_k] = np.concatenate(_v)
+        if for_training:
+            hist_kw, hist_epoch = mass_hist_kw, epoch
+        else:
+            # The test pass runs the best-epoch model and train.py passes epoch=None.
+            # Give it its own book (<tag>_test): sharing the validation book would
+            # overwrite that epoch's validation histograms with test ones. Recorded
+            # as epoch 0 of that book, i.e. "the one model that was tested".
+            hist_kw = dict(mass_hist_kw, tag=mass_hist_kw.get('tag', 'massreg') + '_test')
+            hist_epoch = 0 if epoch is None else epoch
+        book = run_mass_hist(hist_kw, hist_epoch, arrays, tb_helper=tb_helper,
+                             tb_mode='eval' if for_training else 'test')
+        # Optionally let a block-scoped metric, rather than the mixed validation
+        # loss, decide which epoch is "best". The value comes from exactly one
+        # block and therefore exactly one sample, so adding other samples to
+        # --data-val cannot contaminate it. Lower is better, matching how
+        # train.py compares valid_metric in hybrid mode.
+        sel = book.selection_value(hist_epoch) if for_training else None
+        if sel is not None:
+            if np.isfinite(sel):
+                mass_hist_selection_metric = float(sel)
+                _logger.info(
+                    'Best-epoch selection metric (%s.%s over %s) = %.6f; '
+                    'the validation loss (%.6f) is reported but not used for selection',
+                    mass_hist_kw['selection_metric'].get('block'),
+                    mass_hist_kw['selection_metric'].get('metric', 'abs_median_bias'),
+                    'eval' if for_training else 'test', sel, total_loss / count)
+            else:
+                _logger.warning(
+                    'Best-epoch selection metric is configured but has no value at epoch %d '
+                    '(the block filled no sub-bins?); falling back to the validation loss.',
+                    epoch)
+
     ## a temporary hack: save the embeded space
     # tb_helper.writer.add_embedding(np.concatenate(model_embed_output_array), metadata=[data_config.label_value_cls_names[val].replace('label_','') for val in np.concatenate(label_cls_array)], tag='embed')
 
@@ -729,6 +793,12 @@ def evaluate_hybrid(model, test_loader, dev, epoch, for_training=True, loss_func
             ['    - %s: \n%s' % (k, str(v)) for k, v in metric_results_cls.items()]))
 
     if for_training:
+        # train.py treats the returned value as the metric to minimise. When a
+        # block-scoped selection metric is configured it replaces the loss here,
+        # so which sample drives best-epoch selection is an explicit choice rather
+        # than a side effect of what happens to be in --data-val.
+        if mass_hist_selection_metric is not None:
+            return mass_hist_selection_metric
         return total_loss / count
     else:
         # convert 2D labels/scores

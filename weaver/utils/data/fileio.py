@@ -238,7 +238,17 @@ def _read_root(filepath, branches, load_range=None, treename=None):
     }
     specific_vars_included = {}
     '''
-    specific_vars = {}
+    # Tag every jet with the sample it came from, so evaluation metrics can be
+    # routed per-sample (see utils/nn/mass_hist.py SAMPLE_KINDS). The nominal-mass
+    # and smeared-mass Upsilon samples are otherwise indistinguishable event by
+    # event, since both carry gen_pid 553.
+    # Conditions must stay mutually exclusive and cover every input file, or
+    # `sample_kind` goes missing for the files none of them match.
+    specific_vars = {
+        "'/SingleUpsilon' in filepath": {'sample_kind': 1.},          # Y at its physical mass
+        "'/Upsilon_modified_mass/' in filepath": {'sample_kind': 2.},  # Y mass smeared
+        "'/SingleUpsilon' not in filepath and '/Upsilon_modified_mass/' not in filepath": {'sample_kind': 0.},
+    }
     specific_vars_included = {}
 
     def remove_branch(branches, filepath):
