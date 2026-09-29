@@ -44,22 +44,44 @@ def _make_th1(ROOT, name, title, counts, book, normalize=False):
     return h
 
 
+def _draw_mass_max(book):
+    """Upper end of the drawn mass axis: cosmetic only, never affects the counts."""
+    if book.draw_mass_max is None:
+        return book.mass_hi
+    return min(float(book.draw_mass_max), book.mass_hi)
+
+
 def _make_th2(ROOT, name, title, eps, counts_by_epoch, book):
-    """Mass (x) vs. epoch (y); one of these per sub-bin, since 2D overlays don't work."""
+    """Epoch (x) vs. regressed mass (y); one of these per sub-bin, since 2D overlays
+    don't work. Epoch is the x axis so that the evolution reads left to right, the
+    way the trend graphs below it do."""
     e_lo, e_hi = min(eps), max(eps)
     n_e = e_hi - e_lo + 1
-    h = ROOT.TH2F(name, title, book.n_mass, book.mass_lo, book.mass_hi,
-                  n_e, e_lo - 0.5, e_hi + 0.5)
+    h = ROOT.TH2F(name, title, n_e, e_lo - 0.5, e_hi + 0.5,
+                  book.n_mass, book.mass_lo, book.mass_hi)
     for e in eps:
         counts = counts_by_epoch[e]
         total = counts.sum()
         for i, c in enumerate(counts):
-            # normalize each epoch row so the shape evolution is visible regardless
+            # normalize each epoch COLUMN so the shape evolution is visible regardless
             # of how many jets happened to land in this sub-bin that epoch
-            h.SetBinContent(i + 1, e - e_lo + 1, float(c) / total if total > 0 else 0.0)
-    h.GetXaxis().SetTitle('Regressed mass [GeV]')
-    h.GetYaxis().SetTitle('Epoch')
+            h.SetBinContent(e - e_lo + 1, i + 1, float(c) / total if total > 0 else 0.0)
+    h.GetXaxis().SetTitle('Epoch')
+    h.GetYaxis().SetTitle('Regressed mass [GeV]')
     h.GetZaxis().SetTitle('Normalized entries')
+
+    # Zoom, do not discard: the bins above the cut keep their content and the range
+    # travels with the histogram into the .root file, so nothing is lost.
+    m_max = _draw_mass_max(book)
+    if m_max < book.mass_hi:
+        h.GetYaxis().SetRangeUser(book.mass_lo, m_max)
+        above = max((counts_by_epoch[e][book.mass_centers > m_max].sum()
+                     / max(counts_by_epoch[e].sum(), 1)) for e in eps)
+        if above > 0.01:
+            _logger.warning(
+                '%s: %.1f%% of entries lie above the drawn maximum of %g GeV and are '
+                'off the top of the plot. Raise `draw_mass_max` and re-render.',
+                name, 100.0 * above, m_max)
     return h
 
 
@@ -131,6 +153,7 @@ def write_root_output(book, outdir=None, tag=None):
             keep.append(h)
         if keep:
             keep[0].GetYaxis().SetRangeUser(0, 1.35 * max(h.GetMaximum() for h in keep))
+            keep[0].GetXaxis().SetRangeUser(book.mass_lo, _draw_mass_max(book))
             leg.Draw()
             c.Print(pdf)
 
@@ -147,8 +170,8 @@ def write_root_output(book, outdir=None, tag=None):
             h2.Draw('COLZ')
             ref = block.split.ref_value(i)
             line = None
-            if ref is not None and book.mass_lo < ref < book.mass_hi:
-                line = ROOT.TLine(ref, h2.GetYaxis().GetXmin(), ref, h2.GetYaxis().GetXmax())
+            if ref is not None and book.mass_lo < ref < _draw_mass_max(book):
+                line = ROOT.TLine(h2.GetXaxis().GetXmin(), ref, h2.GetXaxis().GetXmax(), ref)
                 line.SetLineColor(2)
                 line.SetLineStyle(2)
                 line.SetLineWidth(2)

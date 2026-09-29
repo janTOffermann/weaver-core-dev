@@ -37,7 +37,7 @@ import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from utils.logger import _logger  # noqa: E402
+from utils.logger import _logger, _configLogger  # noqa: E402
 from utils.nn.mass_hist import MassHistBook, get_book  # noqa: E402
 
 
@@ -84,6 +84,7 @@ def book_kwargs(kw):
 
 
 def render_from_state(network_option):
+    _configLogger('weaver', stdout=sys.stdout)
     book = MassHistBook(**book_kwargs(mass_hist_kw(network_option)))
     if not book.load_state():
         raise SystemExit('No saved state at %s; run the inference steps first.'
@@ -165,6 +166,11 @@ def main():
 
     from train import parser, test_load, model_setup
     args = add_extra_args(parser).parse_args()
+    # train.py configures this inside _main(), which we never call, so without
+    # this every _logger.info -- the sample composition, the per-block fill
+    # counts, the number of jets collected -- is silently dropped and only
+    # warnings reach the job log.
+    _configLogger('weaver', stdout=sys.stdout, filename=args.log_file)
     kw = mass_hist_kw(args.network_option)
 
     test_loaders, data_config = test_load(args)

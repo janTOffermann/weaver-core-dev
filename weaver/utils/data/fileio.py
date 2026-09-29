@@ -41,6 +41,44 @@ def construct_jagged(target, length, builder):
         builder.end_list()
     return builder
 
+# ---- which splits a file may feed --------------------------------------------
+# `split_role` is injected per FILE and consumed by --extra-selection-train/val/test
+# (see the header of the *_split.yaml data config):
+#
+#   0 shared     -- train + val + test, divided by event_no
+#   1 train      -- every event goes to training
+#   2 val        -- every event goes to validation
+#   3 test       -- every event goes to test
+#   4 train+val  -- divided by event_no, but NEVER reaches test
+#
+# Role 4 is the one the Upsilon samples need. The smeared-mass samples exist to be
+# trained on, so none of them should be diverted into the test set; the nominal-mass
+# samples are what we actually want to measure, so they are test-only. Leaving the
+# smeared samples `shared` would have sent 20% of them to test, where they would be
+# both wasted and misleading.
+#
+# This is a second line of defence, not the only one: --data-train/val/test still
+# decide which files are opened at all. A file has to pass both.
+SPLIT_SHARED, SPLIT_TRAIN, SPLIT_VAL, SPLIT_TEST, SPLIT_TRAINVAL = 0, 1, 2, 3, 4
+
+# First match wins, so put a more specific rule ABOVE a more general one. These are
+# substrings: '/SingleUpsilon' also matches '/SingleUpsilonToTauHTauH', which is
+# intended -- both are nominal-mass samples we measure rather than train on.
+# Anything not listed is SPLIT_SHARED, which is what QCD wants: all of it usable,
+# divided across the three splits.
+SPLIT_ROLE_RULES = (
+    ('/Upsilon_modified_mass/', SPLIT_TRAINVAL),
+    ('/SingleUpsilon', SPLIT_TEST),
+)
+
+
+def _split_role(filepath):
+    for fragment, role in SPLIT_ROLE_RULES:
+        if fragment in filepath:
+            return role
+    return SPLIT_SHARED
+
+
 def _read_root(filepath, branches, load_range=None, treename=None):
     '''
     # for training with v4 and v5
@@ -248,6 +286,12 @@ def _read_root(filepath, branches, load_range=None, treename=None):
         "'/SingleUpsilon' in filepath": {'sample_kind': 1.},          # Y at its physical mass
         "'/Upsilon_modified_mass/' in filepath": {'sample_kind': 2.},  # Y mass smeared
         "'/SingleUpsilon' not in filepath and '/Upsilon_modified_mass/' not in filepath": {'sample_kind': 0.},
+        # split_role: exactly one of these matches any given file, by construction
+        "_split_role(filepath) == 0": {'split_role': 0.},
+        "_split_role(filepath) == 1": {'split_role': 1.},
+        "_split_role(filepath) == 2": {'split_role': 2.},
+        "_split_role(filepath) == 3": {'split_role': 3.},
+        "_split_role(filepath) == 4": {'split_role': 4.},
     }
     specific_vars_included = {}
 

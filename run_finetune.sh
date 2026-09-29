@@ -34,7 +34,11 @@ STAGE="${1:-all}"
 # =============================== configuration ===============================
 
 PREFIX=ak8_MD_inclv10_scouting_Upsilon
-CONFIG=weaver/data_new/UpsilonTo3Gluons/${PREFIX//./_}.yaml
+# _3g_binary, not _split: _split.yaml is THREE-class (Y->ggg / Y->tautau / QCD), which does
+# not match NUM_CLS_NODES=2 below and needs the SingleUpsilonToTauHTauH samples in
+# --data-train that TRAIN_SIG does not include. Factorised to binary for now; a
+# _tautau_binary.yaml can be derived the same way for Y->tautau vs QCD.
+CONFIG=weaver/data_new/UpsilonTo3Gluons/${PREFIX//./_}_3g_binary.yaml
 NETWORK=weaver/networks/stage3/example_GloParT3_forScouting.py
 
 # GloParT v3 scouting pre-training: 252 tensors, part.fc.1 is (46, 2048).
@@ -56,18 +60,56 @@ JET_COLLECTION="deepntuples"
 
 DATA_DIR=/HEP/export/home/jofferma/projects/upsilon3g/UpsilonTo3Gluons/mc
 
-TRAIN_SIG="${DATA_DIR}/Upsilon_modified_mass/v[12]/run[1289]/${JET_COLLECTION}/job*/*.root"
-TRAIN_BKG="${DATA_DIR}/QCD/QCD_Bin-PT-*_TuneCP5_13p6TeV_pythia8/run2/${JET_COLLECTION}/job*/*.root"
+# Smeared-mass signal: TRAIN AND VALIDATION ONLY. These samples exist to be
+# trained on, so none of them is diverted into the test set -- enforced twice, by
+# the file lists here and by SPLIT_TRAINVAL in utils/data/fileio.py.
+#
+# All of v1/v2/v3 and every run are used now. Under the old scheme particular runs
+# had to be held back as test files (v2/run3 was TEST_SIG_SCAN); with the split
+# done by event that is no longer necessary, and holding files back would only
+# cost training statistics. Note the runs differ in how far the smearing extends
+# (v1/run1,2,8,9 and v2/run1,2 reach ~25 GeV; v2/run3,4 stop at ~20; v3 at ~22.6),
+# so the mass coverage of train and val is now the union of all of them.
+TRAIN_SIG="${DATA_DIR}/Upsilon_modified_mass/v[123]/run*/${JET_COLLECTION}/job*/*.root"
 
+# QCD is `shared`: no file is held back, and the 70/10/20 event split applies. The
+# same glob therefore appears in train, val AND test -- membership is decided by
+# event_no, not by which files are listed. This is what makes all of the QCD
+# usable; the old config reached only 20% of it.
+TRAIN_BKG="${DATA_DIR}/QCD/QCD_Bin-PT-*_TuneCP5_13p6TeV_pythia8/run[12]/${JET_COLLECTION}/job*/*.root"
+
+# Nominal-mass signal: TEST ONLY, every event. This is the sample we actually want
+# to measure -- Y at its physical mass -- and it is never trained or validated on.
 TEST_SIG_OCTET="${DATA_DIR}/SingleUpsilon/upsilon_*/Octet*/run*/${JET_COLLECTION}/job*/*.root"
-TEST_SIG_SCAN="${DATA_DIR}/Upsilon_modified_mass/v2/run3/${JET_COLLECTION}/job*/*.root"
-TEST_BKG="${DATA_DIR}/QCD/QCD_Bin-PT-*_TuneCP5_13p6TeV_pythia8/run2/${JET_COLLECTION}/job*/*.root"
+TEST_BKG="${TRAIN_BKG}"
+
+# --- train / val / test split --------------------------------------------------
+#
+# Validation is ALWAYS event_no%10 == 7, i.e. exactly 10% of every file that takes
+# part in validation, whatever its role. Test is digits 8-9, and only for `shared`
+# files. Training takes the rest. So:
+#
+#   smeared signal (role 4, train+val) : 90% train, 10% val,  0% test
+#   nominal signal (role 3, test-only) :  0%,        0%,     100%
+#   QCD            (role 0, shared)    : 70% train, 10% val, 20% test
+#
+# To change the train/val balance, move digits between VAL_DIGITS and the rest --
+# each digit is 10% of the sample.
+#
+# NOTE --data-val below is NOT optional. Without it, train.py:297-301 falls back to
+# the entry-range split (train = first 80% of each file, val = last 20%) and that
+# would apply ON TOP of these digits, so validation would be digit 7 AND the file
+# tail. Passing --data-val sets both ranges to (0,1) and lets the digits do all the
+# work.
+SPLIT_TRAIN="(split_role==1) | ((split_role==0) & (event_no%10 <= 6)) | ((split_role==4) & (event_no%10 != 7))"
+SPLIT_VAL="(split_role==2) | (((split_role==0) | (split_role==4)) & (event_no%10 == 7))"
+SPLIT_TEST="(split_role==3) | ((split_role==0) & (event_no%10 > 7))"
 
 # --- node counts --------------------------------------------------------------
 # num_cls_nodes = 2 (Y->ggg, QCD); num_nodes = 2 cls + 1 regression = 3.
 NUM_CLS_NODES=2
 NUM_NODES=3
-LABEL_CLS_NODES="['label_Upsilon_ggg','label_QCD']"
+LABEL_CLS_NODES="['label_Upsilon3g','label_QCD']"
 
 # gamma balances CrossEntropy against gamma * LogCosh (see HybridLoss in the network
 # config). 5 was tuned for the 46-node/24-regression-target pre-training; with a single
@@ -208,10 +250,14 @@ COMMON=(
   --data-config ${CONFIG}
   --network-config ${NETWORK}
   --samples-per-epoch-val ${VAL_SAMPLES}
+  --extra-selection-train "${SPLIT_TRAIN}"
+  --extra-selection-val "${SPLIT_VAL}"
+  --extra-selection-test "${SPLIT_TEST}"
 )
 
 DATA_TRAIN=(--data-train "${TRAIN_SIG}" "${TRAIN_BKG}")
-DATA_TEST=(--data-test "${TEST_SIG_OCTET}" "${TEST_SIG_SCAN}" "${TEST_BKG}")
+DATA_VAL=(--data-val "${TRAIN_SIG}" "${TRAIN_BKG}")
+DATA_TEST=(--data-test "${TEST_SIG_OCTET}" "${TEST_BKG}")
 
 # ============================== STAGE 1: head warm-up ========================
 #
@@ -234,7 +280,7 @@ run_stage1() {
   echo "=== STAGE 1: head warm-up (backbone frozen) ==="
   torchrun --standalone --nnodes=1 --nproc_per_node=${NGPUS} --max_restarts=0 weaver/train.py \
     --run-mode "train,val" \
-    "${COMMON[@]}" "${DATA_TRAIN[@]}" \
+    "${COMMON[@]}" "${DATA_TRAIN[@]}" "${DATA_VAL[@]}" \
     --num-epochs ${S1_EPOCHS} --samples-per-epoch ${S1_SAMPLES} \
     --start-lr ${S1_LR} --lr-scheduler flat+decay \
     --optimizer-option weight_decay 1e-4 \
@@ -271,7 +317,7 @@ run_stage2() {
   echo "=== STAGE 2: full fine-tune, backbone LR = ${S2_LR}, head LR = ${S2_LR} x ${S2_HEAD_MULT} ==="
   torchrun --standalone --nnodes=1 --nproc_per_node=${NGPUS} --max_restarts=0 weaver/train.py \
     --run-mode "train,val,test" \
-    "${COMMON[@]}" "${DATA_TRAIN[@]}" "${DATA_TEST[@]}" \
+    "${COMMON[@]}" "${DATA_TRAIN[@]}" "${DATA_VAL[@]}" "${DATA_TEST[@]}" \
     --num-epochs ${S2_EPOCHS} --samples-per-epoch ${S2_SAMPLES} \
     --start-lr ${S2_LR} --lr-scheduler flat+cos --warmup-steps ${S2_WARMUP} \
     --optimizer-option weight_decay 1e-4 \

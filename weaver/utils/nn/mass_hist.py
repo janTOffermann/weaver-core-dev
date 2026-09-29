@@ -183,7 +183,7 @@ class MassHistBook(object):
 
     def __init__(self, blocks, mass_bins=(100, 0.0, 50.0), outdir='.', tag='massreg',
                  baseline_epoch=-1, min_entries=50, resp_bins=(120, 0.0, 3.0),
-                 selection_metric=None):
+                 selection_metric=None, draw_mass_max=None):
         self.blocks = [b if isinstance(b, MassHistBlock) else MassHistBlock.from_dict(b)
                        for b in blocks]
         n, lo, hi = mass_bins
@@ -203,6 +203,11 @@ class MassHistBook(object):
         self.baseline_epoch = baseline_epoch
         self.min_entries = int(min_entries)
         self.selection_metric = selection_metric
+        # Upper end of the regressed-mass axis WHEN DRAWING. Purely cosmetic: the
+        # histograms are still filled over the full `mass_bins` range and the .npz
+        # is unchanged, so raising it later needs only a re-render, not a re-run.
+        # None means draw the whole range.
+        self.draw_mass_max = None if draw_mass_max is None else float(draw_mass_max)
         # {block_name: {sub_name: {epoch: counts}}}
         self.counts = {b.name: {} for b in self.blocks}
         self.resp_counts = {b.name: {} for b in self.blocks}
